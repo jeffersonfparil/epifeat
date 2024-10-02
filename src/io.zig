@@ -12,7 +12,9 @@ pub fn slices(n: u64) !f64 {
     defer x.deinit();
     var i: u64 = 0;
     while (i < n) : (i += 1) {
-        try x.append(rand.float(f32));
+        const x_new: f64 = rand.float(f64);
+        try x.append(x_new);
+        std.debug.print("x_new[{?}]={?}\n", .{ i, x_new });
     }
     for (x.items, 0..) |s, j| {
         std.debug.print("x[{?}]={?}\n", .{ j, s });
