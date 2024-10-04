@@ -3,35 +3,27 @@ const Allocator: type = std.mem.Allocator;
 
 fn Matrix(comptime T: type) type {
     return struct {
-        const Self = @This();
-        items: [][]T,
+        data: [][]T = undefined,
         n: usize,
         p: usize,
-        allocator: Allocator,
 
-        pub fn init(allocator: Allocator, n: usize, p: usize) Self {
-            return Self{
-                .items = &[n][p]T{},
+        const Self = @This();
+
+        pub fn init(n: usize, p: usize, allocator: Allocator) !Self {
+            const data = try allocator.alloc([]T, n);
+            for (0..n) |i| {
+                data[i] = try allocator.alloc(T, p);
+            }
+            return .{
+                .data = data,
                 .n = n,
                 .p = p,
-                .allocator = allocator,
             };
         }
 
-        /// Initialize with capacity to hold `num` elements.
-        /// The resulting capacity will equal `num` exactly.
-        /// Deinitialize with `deinit` or use `toOwnedSlice`.
-        pub fn initCapacity(allocator: Allocator, num: usize) Allocator.Error!Self {
-            var self = Self.init(allocator);
-            try self.ensureTotalCapacityPrecise(num);
-            return self;
-        }
-
-        /// Release all allocated memory.
-        pub fn deinit(self: Self) void {
-            if (@sizeOf(T) > 0) {
-                self.allocator.free(self.allocatedSlice());
-            }
+        pub fn dim(self: Self) [2]usize {
+            const x: [2]usize = [2]usize{ self.n, self.p };
+            return x;
         }
     };
 }
@@ -57,8 +49,12 @@ test "linalg" {
     // std.debug.print("x.items[0].items[1]={?}\n", .{x.items[0].items[1]});
     // std.debug.print("x.items[0].items[2]={?}\n", .{x.items[0].items[2]});
 
-    const a = try Matrix(f64).init(allocator, 10, 20);
-    std.debug.print("a.items[0]={?}\n", .{a.items[0]});
+    const a = try Matrix(f64).init(2, 3, allocator);
+    std.debug.print("a.data[0][0]={?}\n", .{a.data[0][0]});
+    std.debug.print("a={any}\n", .{a});
+    std.debug.print("a.dim()={any}\n", .{a.dim()});
+    std.debug.print("a.dim()[0]={any}\n", .{a.dim()[0]});
+    std.debug.print("a.dim()[1]={any}\n", .{a.dim()[1]});
     // std.debug.print("a.p={?}\n", .{a.p});
     // std.debug.print("a.A.items[0].items[0]={?}\n", .{a.A.items[0].items[0]});
 }
