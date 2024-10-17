@@ -91,7 +91,7 @@ fn Matrix(comptime T: type) type {
             }
             return row_indexes;
         }
-        // LU decomposition
+        // LU decomposition (Ref: https://rosettacode.org/wiki/LU_decomposition)
         pub fn lu(self: Self, allocator: Allocator) ![3]Self {
             // Make sure the matrix is square
             if (self.n != self.p) {
@@ -117,18 +117,18 @@ fn Matrix(comptime T: type) type {
                 P.data[row_indexes[i]][i] = 1.0;
                 // std.debug.print("[In lu]: P.data[{any}][{any}]={any}\n", .{ row_indexes[i], i, P.data[row_indexes[i]][i] });
             }
-
-            // // Decompose
-            // var row_idx: usize = 0;
-            // for (0..self.n) |i| {
-            //     row_idx = row_indexes[i];
-            //     L.data[i][i] = 1.0;
-            //     for (0..self.p) |j| {
-            //         const a: T = self.data[row_idx][j];
-            //         var ul: T = a - a;
-            //         for ()
-            //     }
-            // }
+            // Decompose
+            for (row_indexes, 0..) |i_a, i| {
+                for (0..self.p) |j| {
+                    const a_ij = self.data[i_a][j];
+                    var sum_ukj_lik = U.data[i][j] * L.data[i][j];
+                    for (row_indexes[0..i], 0..) |_, k| {
+                        sum_ukj_lik += U.data[k][j] * L.data[i][k];
+                    }
+                    U.data[i][j] = a_ij - sum_ukj_lik;
+                    // Then for L
+                }
+            }
 
             return [3]Self{ P, L, U };
         }
