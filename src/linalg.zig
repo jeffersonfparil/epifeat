@@ -35,6 +35,48 @@ fn Matrix(comptime T: type) type {
             }
             allocator.free(self.data);
         }
+        // Define constants: zero and one with the correct type
+        pub fn define_constants(self: Self) ![2]T {
+            const zero = self.data[0][0] - self.data[0][0];
+            var one = self.data[0][0] / self.data[0][0];
+            for (0..self.n) |i| {
+                for (0..self.p) |j| {
+                    if (self.data[i][j] > zero) {
+                        one = self.data[i][j] / self.data[i][j];
+                        break;
+                    }
+                }
+            }
+            return [2]T{ zero, one };
+        }
+        /// Initiliase an identity matrix
+        pub fn init_identity(n: usize, allocator: Allocator) !Self {
+            var identity = try Matrix(T).init(n, n, allocator);
+            const constants = try identity.define_constants();
+            const zero = constants[0];
+            const one = constants[1];
+            for (0..n) |i| {
+                for (0..n) |j| {
+                    if (i == j) {
+                        identity.data[i][j] = one;
+                    } else {
+                        identity.data[i][j] = zero;
+                    }
+                }
+            }
+            return identity;
+        }
+        /// Initiliase a matrix filled with a value
+        pub fn init_fill(n: usize, p: usize, value: T, allocator: Allocator) !Self {
+            var matrix = try Matrix(T).init(n, p, allocator);
+            for (0..n) |i| {
+                for (0..p) |j| {
+                    matrix.data[i][j] = value;
+                }
+            }
+            return matrix;
+        }
+        /// Initiliase a matrix filled with zeros
         /// Matrix multiplication
         pub fn mult(self: Self, x: Self, allocator: Allocator) !Self {
             if ((self.p != x.n) or (self.n != x.p)) {
@@ -91,6 +133,12 @@ fn Matrix(comptime T: type) type {
             }
             return row_indexes;
         }
+
+        // // Gaussian elimination
+        // pub fn gaussian_elimination(self: Self, b: Self, allocator: Allocator) !Self {
+        //     return self;
+        // }
+
         // LU decomposition (Ref: https://rosettacode.org/wiki/LU_decomposition)
         pub fn lu(self: Self, allocator: Allocator) ![3]Self {
             // Make sure the matrix is square
@@ -101,36 +149,56 @@ fn Matrix(comptime T: type) type {
             var P = try Matrix(T).init(self.n, self.p, allocator);
             var L = try Matrix(T).init(self.n, self.p, allocator);
             var U = try Matrix(T).init(self.n, self.p, allocator);
+            // Constants
+            const constants = try self.define_constants();
+            const zero = constants[0];
+            const one = constants[1];
             // Populate with zeros
             for (0..self.n) |i| {
                 for (0..self.p) |j| {
-                    P.data[i][j] = 0.0;
-                    L.data[i][j] = 0.0;
-                    U.data[i][j] = 0.0;
+                    P.data[i][j] = zero;
+                    L.data[i][j] = zero;
+                    U.data[i][j] = zero;
                 }
             }
             // Define the permutation matrix
             const row_indexes = try self.pivot(allocator);
             defer allocator.free(row_indexes);
-            // std.debug.print("[In lu]: row_indexes={any}\n", .{row_indexes});
             for (0..self.n) |i| {
-                P.data[row_indexes[i]][i] = 1.0;
-                // std.debug.print("[In lu]: P.data[{any}][{any}]={any}\n", .{ row_indexes[i], i, P.data[row_indexes[i]][i] });
+                P.data[row_indexes[i]][i] = one;
             }
             // Decompose
-            for (row_indexes, 0..) |i_a, i| {
-                for (0..self.p) |j| {
-                    const a_ij = self.data[i_a][j];
-                    var sum_ukj_lik = U.data[i][j] * L.data[i][j];
-                    for (row_indexes[0..i], 0..) |_, k| {
-                        sum_ukj_lik += U.data[k][j] * L.data[i][k];
+            for (0..self.p) |j| {
+                L.data[j][j] = one;
+                for (row_indexes[0..(j + 1)], 0..) |i_a, i| {
+                    var s1 = zero;
+                    for (0..i) |k| {
+                        s1 += U.data[k][j] * L.data[i][k];
                     }
-                    U.data[i][j] = a_ij - sum_ukj_lik;
-                    // Then for L
+                    U.data[i][j] = self.data[i_a][j] - s1;
+                }
+                for (row_indexes[j..self.n], j..self.n) |i_a, i| {
+                    var s2 = zero;
+                    for (0..j) |k| {
+                        s2 += U.data[k][j] * L.data[i][k];
+                    }
+                    L.data[i][j] = (self.data[i_a][j] - s2) / U.data[j][j];
                 }
             }
-
             return [3]Self{ P, L, U };
+        }
+
+        // Determinant
+        pub fn det(self: Self, allocator: Allocator) !T {
+            // LU decomposition
+            const P_L_U = try self.lu(allocator);
+            // Find the determinant as the product of the diagonal elements of U since the diagonals of L are all one.
+            var determinant = P_L_U[1].data[0][0];
+            for (0..self.n) |i| {
+                determinant *= P_L_U[2].data[i][i];
+            }
+            std.debug.print("determinant={any}\n", .{determinant});
+            return determinant;
         }
     };
 }
@@ -159,6 +227,39 @@ test "linalg" {
     }
     std.debug.print("a={any}\n", .{a});
     std.debug.print("b={any}\n", .{b});
+
+    // Define constants one and zero with the correct type
+    const constants = try a.define_constants();
+    try expect(constants[0] == 0.0);
+    try expect(constants[1] == 1.0);
+
+    // Identity matrix
+    const identity = try Matrix(f64).init_identity(n, allocator);
+    defer identity.deinit(allocator);
+    for (0..n) |i| {
+        for (0..n) |j| {
+            if (i == j) {
+                try expect(identity.data[i][j] == 1.00);
+            } else {
+                try expect(identity.data[i][j] == 0.00);
+            }
+        }
+    }
+
+    // Pre-filled matrix with a constant value
+    const value: f64 = 3.1416;
+    const matrix_with_constant = try Matrix(f64).init_fill(n, p, value, allocator);
+    defer matrix_with_constant.deinit(allocator);
+    for (0..n) |i| {
+        for (0..n) |j| {
+            try expect(matrix_with_constant.data[i][j] == value);
+        }
+    }
+
+    // Determinant
+    const determinant = try a.det(allocator);
+    try expect(determinant - 284.0 < 0.0001);
+
     // Matrix multiplication
     const c = try a.mult(b, allocator);
     defer c.deinit(allocator);
