@@ -76,6 +76,16 @@ fn Matrix(comptime T: type) type {
             }
             return matrix;
         }
+        /// Clone a matrix
+        pub fn clone(self: Self, allocator: Allocator) !Self {
+            var copy = try Matrix(T).init(self.n, self.p, allocator);
+            for (0..self.n) |i| {
+                for (0..self.p) |j| {
+                    copy.data[i][j] = self.data[i][j];
+                }
+            }
+            return copy;
+        }
         /// Initiliase a matrix filled with zeros
         /// Matrix multiplication
         pub fn mult(self: Self, x: Self, allocator: Allocator) !Self {
@@ -134,10 +144,39 @@ fn Matrix(comptime T: type) type {
             return row_indexes;
         }
 
-        // // Gaussian elimination
-        // pub fn gaussian_elimination(self: Self, b: Self, allocator: Allocator) !Self {
-        //     return self;
-        // }
+        // Gaussian elimination
+        pub fn gaussian_elimination(self: Self, b: Self, allocator: Allocator) !T {
+            // Make sure the matrix is square
+            if (self.n != self.p) {
+                return MatrixError.NonSquareMatrix;
+            }
+            // Define constants
+            const constants = try self.define_constants();
+            const zero = constants[0];
+            const one = constants[1];
+            var determinant = one;
+            // Define the pivot
+            const row_indexes = try self.pivot(allocator);
+            // Instatiate the pivoted reduced row echelon form matrices of self and b
+            var self_echelon = try self.clone(allocator);
+            var b_echelon = try b.clone(allocator);
+            // Calculate the determinant
+            for (row_indexes, 0..) |i_pivot, i| {
+                if (i_pivot != i) {
+                    for (0..self.p) |j| {
+                        self_echelon.data[i][j] = self.data[i_pivot][j];
+                        self_echelon.data[i_pivot][j] = self.data[i][j];
+                        b_echelon.data[i][j] = b.data[i_pivot][j];
+                        b_echelon.data[i_pivot][j] = b.data[i][j];
+                    }
+                    determinant *= -one;
+                }
+                for (row_indexes[(i + 1)..], (i + 1)..) |j_pivot, j| {
+                    const t = self.data[j_pivot][i_pivot] / self.data[i_pivot][i_pivot];
+                }
+            }
+            return determinant;
+        }
 
         // LU decomposition (Ref: https://rosettacode.org/wiki/LU_decomposition)
         pub fn lu(self: Self, allocator: Allocator) ![3]Self {
@@ -188,18 +227,18 @@ fn Matrix(comptime T: type) type {
             return [3]Self{ P, L, U };
         }
 
-        // Determinant
-        pub fn det(self: Self, allocator: Allocator) !T {
-            // LU decomposition
-            const P_L_U = try self.lu(allocator);
-            // Find the determinant as the product of the diagonal elements of U since the diagonals of L are all one.
-            var determinant = P_L_U[1].data[0][0];
-            for (0..self.n) |i| {
-                determinant *= P_L_U[2].data[i][i];
-            }
-            std.debug.print("determinant={any}\n", .{determinant});
-            return determinant;
-        }
+        // // Determinant
+        // pub fn det(self: Self, allocator: Allocator) !T {
+        //     // LU decomposition
+        //     const P_L_U = try self.lu(allocator);
+        //     // Find the determinant as the product of the diagonal elements of U since the diagonals of L are all one.
+        //     var determinant = P_L_U[1].data[0][0];
+        //     for (0..self.n) |i| {
+        //         determinant *= P_L_U[2].data[i][i];
+        //     }
+        //     std.debug.print("determinant={any}\n", .{determinant});
+        //     return determinant;
+        // }
     };
 }
 
@@ -256,9 +295,17 @@ test "linalg" {
         }
     }
 
+    // Clone
+    const a_copy = try a.clone(allocator);
+    for (0..n) |i| {
+        for (0..n) |j| {
+            try expect(a_copy.data[i][j] == a.data[i][j]);
+        }
+    }
+
     // Determinant
-    const determinant = try a.det(allocator);
-    try expect(determinant - 284.0 < 0.0001);
+    // const determinant = try a.det(allocator);
+    // try expect(determinant - 284.0 < 0.0001);
 
     // Matrix multiplication
     const c = try a.mult(b, allocator);
