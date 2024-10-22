@@ -77,7 +77,7 @@ fn Matrix(comptime T: type) type {
             return matrix;
         }
         /// Clone a matrix
-        pub fn clone(self: Self, allocator: Allocator) !Self {
+        pub fn clone(self: *const Self, allocator: Allocator) !Self {
             var copy = try Matrix(T).init(self.n, self.p, allocator);
             for (0..self.n) |i| {
                 for (0..self.p) |j| {
@@ -145,37 +145,63 @@ fn Matrix(comptime T: type) type {
         }
 
         // Gaussian elimination
-        pub fn gaussian_elimination(self: Self, b: Self, allocator: Allocator) !T {
+        pub fn gaussian_elimination(self: Self, b: Self, allocator: Allocator) ![2]Self {
             // Make sure the matrix is square
             if (self.n != self.p) {
                 return MatrixError.NonSquareMatrix;
             }
             // Define constants
             const constants = try self.define_constants();
-            const zero = constants[0];
+            // const zero = constants[0];
             const one = constants[1];
             var determinant = one;
             // Define the pivot
             const row_indexes = try self.pivot(allocator);
             // Instatiate the pivoted reduced row echelon form matrices of self and b
-            var self_echelon = try self.clone(allocator);
-            var b_echelon = try b.clone(allocator);
-            // Calculate the determinant
+            var self_echelon = try Matrix(T).init(self.n, self.p, allocator);
+            var b_echelon = try Matrix(T).init(b.n, b.p, allocator);
             for (row_indexes, 0..) |i_pivot, i| {
-                if (i_pivot != i) {
-                    for (0..self.p) |j| {
-                        self_echelon.data[i][j] = self.data[i_pivot][j];
-                        self_echelon.data[i_pivot][j] = self.data[i][j];
-                        b_echelon.data[i][j] = b.data[i_pivot][j];
-                        b_echelon.data[i_pivot][j] = b.data[i][j];
-                    }
-                    determinant *= -one;
-                }
-                for (row_indexes[(i + 1)..], (i + 1)..) |j_pivot, j| {
-                    const t = self.data[j_pivot][i_pivot] / self.data[i_pivot][i_pivot];
+                for (0..self.p) |j| {
+                    self_echelon.data[i][j] = self.data[i_pivot][j];
+                    b_echelon.data[i][j] = b.data[i_pivot][j];
                 }
             }
-            return determinant;
+            // Elliminate all hoomans...
+            for (0..(self.n - 1)) |i| {
+                if (row_indexes[i] != i) {
+                    determinant *= -one;
+                }
+                for ((i + 1)..self.n) |j| {
+                    const t = self_echelon.data[j][i] / self_echelon.data[i][i];
+                    for ((i + 1)..self.n) |k| {
+                        self_echelon.data[j][k] -= t * self_echelon.data[i][k];
+                    }
+                    for (0..self.p) |k| {
+                        b_echelon.data[j][k] -= t * b_echelon.data[i][k];
+                    }
+                }
+            }
+
+            for (0..self.n) |i_inverse| {
+                const i: usize = self.n - (i_inverse + 1);
+                for ((i + 1)..self.n) |j| {
+                    const t = self_echelon.data[i][j];
+                    for (0..self.p) |k| {
+                        b_echelon.data[i][k] -= t * b_echelon.data[j][k];
+                    }
+                }
+                const t = one / self_echelon.data[i][i];
+                determinant *= self_echelon.data[i][i];
+                for (0..self.p) |j| {
+                    b_echelon.data[i][j] *= t;
+                }
+            }
+            std.debug.print("determinant={any}\n", .{determinant});
+            std.debug.print("self_echelon.data={any}\n", .{self_echelon.data});
+            std.debug.print("self.data={any}\n", .{self.data});
+            std.debug.print("b_echelon.data={any}\n", .{b_echelon.data});
+            std.debug.print("b.data={any}\n", .{b.data});
+            return [2]Self{ self_echelon, b_echelon };
         }
 
         // LU decomposition (Ref: https://rosettacode.org/wiki/LU_decomposition)
@@ -306,6 +332,23 @@ test "linalg" {
     // Determinant
     // const determinant = try a.det(allocator);
     // try expect(determinant - 284.0 < 0.0001);
+
+    // Gaussian ellimination
+    const echelons = try a.gaussian_elimination(identity, allocator);
+    defer echelons[0].deinit(allocator);
+    defer echelons[1].deinit(allocator);
+    const a_inverse = echelons[1];
+    std.debug.print("a_inverse={any}\n", .{a_inverse});
+    const should_be_identity = try a.mult(a_inverse, allocator);
+    std.debug.print("should_be_identity={any}\n", .{should_be_identity});
+    std.debug.print("a={any}\n", .{a});
+    std.debug.print("identity={any}\n", .{identity});
+
+    var det: f64 = 1.00;
+    for (0..a.n) |i| {
+        det *= echelons[0].data[i][i];
+    }
+    std.debug.print("det={any}\n", .{det});
 
     // Matrix multiplication
     const c = try a.mult(b, allocator);
