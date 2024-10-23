@@ -143,7 +143,6 @@ fn Matrix(comptime T: type) type {
             }
             return row_indexes;
         }
-
         // Gaussian elimination
         pub fn gaussian_elimination(self: Self, b: Self, allocator: Allocator) ![2]Self {
             // Make sure the matrix is square
@@ -203,7 +202,6 @@ fn Matrix(comptime T: type) type {
             std.debug.print("b.data={any}\n", .{b.data});
             return [2]Self{ self_echelon, b_echelon };
         }
-
         // LU decomposition (Ref: https://rosettacode.org/wiki/LU_decomposition)
         pub fn lu(self: Self, allocator: Allocator) ![3]Self {
             // Make sure the matrix is square
