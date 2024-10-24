@@ -21,3 +21,5 @@ jobs:
           version: ${{ matrix.zig-version }}
       - name: Test io.zig
         run: zig test src/io.zig
+      - name: Test linalg.zig
+        run: zig test src/linalg.zig

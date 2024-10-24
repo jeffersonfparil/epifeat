@@ -86,6 +86,12 @@ fn Matrix(comptime T: type) type {
             }
             return copy;
         }
+        /// Print matrix
+        pub fn print(self: Self) !void {
+            for (0..self.n) |i| {
+                std.debug.print("{d:.2}\n", .{self.data[i]});
+            }
+        }
         /// Matrix multiplication: A*B
         pub fn mult(self: Self, b: Self, allocator: Allocator) !Self {
             if (self.p != b.n) {
@@ -166,7 +172,7 @@ fn Matrix(comptime T: type) type {
                 // We iterate across row indexes which are undergoing sorting while skipping the previously sorted rows.
                 var i_max: usize = j;
                 for (row_indexes[j..]) |i| {
-                    if (self.data[i_max][j] < self.data[i][j]) {
+                    if (@abs(self.data[i_max][j]) < @abs(self.data[i][j])) {
                         i_max = i;
                     }
                 }
@@ -193,10 +199,10 @@ fn Matrix(comptime T: type) type {
                 return MatrixError.IncompatibleMatrices;
             }
             // Define constants
-            // const constants = try self.define_constants();
-            // const zero = constants[0];
-            // const one = constants[1];
-            // var determinant = one;
+            const constants = try self.define_constants();
+            const zero = constants[0];
+            const one = constants[1];
+            var determinant = one;
             // Define the pivot
             const row_indexes = try self.pivot(allocator);
             defer allocator.free(row_indexes);
@@ -206,6 +212,9 @@ fn Matrix(comptime T: type) type {
             var self_echelon = try Matrix(T).init(self.n, self.p, allocator);
             var b_echelon = try Matrix(T).init(b.n, b.p, allocator);
             for (row_indexes, 0..) |i_pivot, i| {
+                if (i_pivot != i) {
+                    determinant = -determinant;
+                }
                 for (0..self.p) |j| {
                     self_echelon.data[i][j] = self.data[i_pivot][j];
                 }
@@ -214,19 +223,29 @@ fn Matrix(comptime T: type) type {
                 }
             }
             // Perform elementary row operations to convert self into an upper-triangular matrix, with diagonal of ones
-            std.debug.print("[BEFORE] self_echelon={any}\n", .{self_echelon});
+            std.debug.print("[BEFORE]\n", .{});
+            try self_echelon.print();
             // Forward: from the upper-left corner to the lower-right corner
             for (0..self_echelon.n) |i| {
                 const a_ii = self_echelon.data[i][i];
+                determinant *= a_ii;
+                // Set the digonals as one
                 for (0..self_echelon.p) |j| {
-                    self_echelon.data[i][j] /= a_ii;
+                    if (self_echelon.data[i][j] != zero) {
+                        self_echelon.data[i][j] /= a_ii;
+                    }
                 }
                 for (0..b_echelon.p) |j| {
-                    b_echelon.data[i][j] /= a_ii;
+                    if (b_echelon.data[i][j] != zero) {
+                        b_echelon.data[i][j] /= a_ii;
+                    }
                 }
                 if ((i + 1) == self_echelon.n) {
                     break;
                 }
+                // Subtract the product of the current diagonal value which is one and the value of the value below it to get a zero,
+                // and do this for the whole row below it, where the values below the values to the left of the current diagonal value
+                // are zero from previous iterations which also render all values below them to zero.
                 for (0..(i + 1)) |k| {
                     const a_i_1k = self_echelon.data[i + 1][k];
                     for (0..self_echelon.p) |j| {
@@ -236,20 +255,29 @@ fn Matrix(comptime T: type) type {
                         b_echelon.data[i + 1][j] -= a_i_1k * b_echelon.data[k][j];
                     }
                 }
-                std.debug.print("self_echelon-iter={any}={any}\n", .{ i, self_echelon });
+                // std.debug.print("self_echelon-iter={any}={any}\n", .{ i, self_echelon });
+                std.debug.print("Iteration {any}\n", .{i});
+                try self_echelon.print();
             }
-            std.debug.print("[AFTER] self_echelon={any}\n", .{self_echelon});
+            std.debug.print("determinant={any}\n", .{determinant});
+            std.debug.print("zero * -one={any}\n", .{zero * -one});
+            std.debug.print("[AFTER]\n", .{});
+            try self_echelon.print();
+
+            if (@abs(determinant) < @as(T, 0.000001)) {
+                return MatrixError.SingularMatrix;
+            }
 
             // Reverse: from the lower-right corner to the upper-left corner
             for (0..self_echelon.n) |i_inverse| {
                 const i = self_echelon.n - (i_inverse + 1);
-                const a_ii = self_echelon.data[i][i];
-                for (0..self_echelon.p) |j| {
-                    self_echelon.data[i][j] /= a_ii;
-                }
-                for (0..b_echelon.p) |j| {
-                    b_echelon.data[i][j] /= a_ii;
-                }
+                // const a_ii = self_echelon.data[i][i];
+                // for (0..self_echelon.p) |j| {
+                //     self_echelon.data[i][j] /= a_ii;
+                // }
+                // for (0..b_echelon.p) |j| {
+                //     b_echelon.data[i][j] /= a_ii;
+                // }
                 if (i == 0) {
                     break;
                 }
@@ -263,21 +291,24 @@ fn Matrix(comptime T: type) type {
                         b_echelon.data[i - 1][j] -= a_i_1k * b_echelon.data[k][j];
                     }
                 }
-                std.debug.print("self_echelon-REVERSE-iter={any}={any}\n", .{ i, self_echelon });
+                std.debug.print("Iteration {any}\n", .{i});
+                try self_echelon.print();
             }
 
-            // Reverse the pivot by storing output in self_echelon for memory efficiency.
-            for (row_indexes, 0..) |i_pivot, i| {
-                for (0..b.p) |j| {
-                    self_echelon.data[i_pivot][j] = b_echelon.data[i][j];
-                }
-            }
+            // // Reverse the pivot by storing output in self_echelon for memory efficiency.
+            // for (row_indexes, 0..) |i_pivot, i| {
+            //     for (0..b.p) |j| {
+            //         self_echelon.data[i_pivot][j] = b_echelon.data[i][j];
+            //     }
+            // }
 
-            std.debug.print("[FINAL] self_echelon={any}\n", .{self_echelon});
-            std.debug.print("[FINAL] b_echelon={any}\n", .{b_echelon});
+            std.debug.print("[FINAL self_echelon]\n", .{});
+            try self_echelon.print();
+            std.debug.print("[FINAL b_echelon]\n", .{});
+            try b_echelon.print();
 
             // return [2]Self{ self_echelon, b_echelon };
-            return [2]Self{ b_echelon, self_echelon };
+            return [2]Self{ self_echelon, b_echelon };
         }
         /// LU decomposition (Ref: https://rosettacode.org/wiki/LU_decomposition)
         pub fn lu(self: Self, allocator: Allocator) ![3]Self {
@@ -495,8 +526,8 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
-    const n: usize = 4;
-    const p: usize = 4;
+    const n: usize = 5;
+    const p: usize = 5;
     var a = try Matrix(f64).init(n, p, allocator);
     defer a.deinit(allocator);
     try expect(a.n == n);
@@ -507,7 +538,9 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
     var b = try Matrix(f64).init(n, p, allocator);
     defer b.deinit(allocator);
     // const contents = [16]f64{ 11.0, 9.0, 24.0, 2.0, 1.0, 5.0, 2.0, 6.0, 3.0, 17.0, 18.0, 1.0, 2.0, 5.0, 7.0, 1.0 };
-    const contents = [16]f64{ 2, 2, 3, 4, 2.5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+    const contents = [25]f64{ 12, 22, 35, 64, 2, 16, 72, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970 };
+    // const contents = [9]f64{ 2, 9, 4, 7, 5, 3, 6, 1, 8 };
+    // const contents = [16]f64{ 2, 2, 3, 4, 2.5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }; // MatrixError.SingularMatrix
     for (0..n) |i| {
         for (0..p) |j| {
             a.data[i][j] = contents[(i * p) + j];
@@ -536,11 +569,14 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
     defer echelons[0].deinit(allocator);
     defer echelons[1].deinit(allocator);
     const a_inverse = echelons[1];
-    std.debug.print("echelons[0]={any}\n", .{echelons[0]});
-    std.debug.print("a_inverse={any}\n", .{a_inverse});
+    std.debug.print("echelons[0]\n", .{});
+    try echelons[0].print();
+    std.debug.print("a_inverse\n", .{});
+    try a_inverse.print();
     const should_be_identity = try a.mult(a_inverse, allocator);
     defer should_be_identity.deinit(allocator);
-    std.debug.print("should_be_identity={any}\n", .{should_be_identity});
+    std.debug.print("should_be_identity\n", .{});
+    try should_be_identity.print();
     for (0..n) |i| {
         for (0..n) |j| {
             var value = should_be_identity.data[i][j];
@@ -560,33 +596,15 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
     }
     std.debug.print("det={any}\n", .{det});
 
-    var non_square_matrix = try Matrix(f64).init(5, 3, allocator);
-    defer non_square_matrix.deinit(allocator);
-    var identity_for_non_square_matrix = try Matrix(f64).init_identity(5, allocator);
-    defer identity_for_non_square_matrix.deinit(allocator);
-    var counter: usize = 0;
-    for (0..5) |i| {
-        for (0..3) |j| {
-            non_square_matrix.data[i][j] = contents[counter];
-            counter += 1;
-        }
-    }
-    const x = try non_square_matrix.gaussian_elimination(identity_for_non_square_matrix, allocator);
-    defer x[0].deinit(allocator);
-    defer x[1].deinit(allocator);
-    std.debug.print("x[0]={any}\n", .{x[0]});
-    std.debug.print("x[1]={any}\n", .{x[1]});
-
-    const should_be_identity_non_square = try x[1].mult(non_square_matrix, allocator);
-    defer should_be_identity_non_square.deinit(allocator);
-    std.debug.print("should_be_identity_non_square={any}\n", .{should_be_identity_non_square});
-
     // LU decomposition
     const out_test = try a.lu(allocator);
     defer out_test[0].deinit(allocator);
     defer out_test[1].deinit(allocator);
     defer out_test[2].deinit(allocator);
-    std.debug.print("out_test[0]={any}\n", .{out_test[0]});
-    std.debug.print("out_test[1]={any}\n", .{out_test[1]});
-    std.debug.print("out_test[2]={any}\n", .{out_test[2]});
+    std.debug.print("out_test[0]\n", .{});
+    try out_test[0].print();
+    std.debug.print("out_test[1]\n", .{});
+    try out_test[1].print();
+    std.debug.print("out_test[2]\n", .{});
+    try out_test[2].print();
 }

@@ -4,4 +4,4 @@ Generate epistasis feature set for genomic prediction. Using an $n \times p$ mat
 
 |**Build Status**|**License**|
 |:--------------:|:---------:|
-| <a href="https://github.com/jeffersonfparil/epifeat/actions"><img src="https://github.com/jeffersonfparil/epifeat/actions/workflows/rust.yml/badge.svg"></a> | [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0) |
+| <a href="https://github.com/jeffersonfparil/epifeat/actions"><img src="https://github.com/jeffersonfparil/epifeat/actions/workflows/zig.yml/badge.svg"></a> | [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0) |
