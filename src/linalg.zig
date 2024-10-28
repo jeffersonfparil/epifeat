@@ -223,8 +223,8 @@ fn Matrix(comptime T: type) type {
                 }
             }
             // Perform elementary row operations to convert self into an upper-triangular matrix, with diagonal of ones
-            std.debug.print("[BEFORE]\n", .{});
-            try self_echelon.print();
+            // std.debug.print("[BEFORE]\n", .{});
+            // try self_echelon.print();
             // Forward: from the upper-left corner to the lower-right corner
             for (0..self_echelon.n) |i| {
                 const a_ii = self_echelon.data[i][i];
@@ -255,29 +255,19 @@ fn Matrix(comptime T: type) type {
                         b_echelon.data[i + 1][j] -= a_i_1k * b_echelon.data[k][j];
                     }
                 }
-                // std.debug.print("self_echelon-iter={any}={any}\n", .{ i, self_echelon });
-                std.debug.print("Iteration {any}\n", .{i});
-                try self_echelon.print();
+                // std.debug.print("Iteration {any}\n", .{i});
+                // try self_echelon.print();
             }
-            std.debug.print("determinant={any}\n", .{determinant});
-            std.debug.print("zero * -one={any}\n", .{zero * -one});
-            std.debug.print("[AFTER]\n", .{});
-            try self_echelon.print();
-
+            // std.debug.print("determinant={any}\n", .{determinant});
+            // std.debug.print("zero * -one={any}\n", .{zero * -one});
+            // std.debug.print("[AFTER]\n", .{});
+            // try self_echelon.print();
             if (@abs(determinant) < @as(T, 0.000001)) {
                 return MatrixError.SingularMatrix;
             }
-
             // Reverse: from the lower-right corner to the upper-left corner
             for (0..self_echelon.n) |i_inverse| {
                 const i = self_echelon.n - (i_inverse + 1);
-                // const a_ii = self_echelon.data[i][i];
-                // for (0..self_echelon.p) |j| {
-                //     self_echelon.data[i][j] /= a_ii;
-                // }
-                // for (0..b_echelon.p) |j| {
-                //     b_echelon.data[i][j] /= a_ii;
-                // }
                 if (i == 0) {
                     break;
                 }
@@ -291,23 +281,13 @@ fn Matrix(comptime T: type) type {
                         b_echelon.data[i - 1][j] -= a_i_1k * b_echelon.data[k][j];
                     }
                 }
-                std.debug.print("Iteration {any}\n", .{i});
-                try self_echelon.print();
+                // std.debug.print("Iteration {any}\n", .{i});
+                // try self_echelon.print();
             }
-
-            // // Reverse the pivot by storing output in self_echelon for memory efficiency.
-            // for (row_indexes, 0..) |i_pivot, i| {
-            //     for (0..b.p) |j| {
-            //         self_echelon.data[i_pivot][j] = b_echelon.data[i][j];
-            //     }
-            // }
-
-            std.debug.print("[FINAL self_echelon]\n", .{});
-            try self_echelon.print();
-            std.debug.print("[FINAL b_echelon]\n", .{});
-            try b_echelon.print();
-
-            // return [2]Self{ self_echelon, b_echelon };
+            // std.debug.print("[FINAL self_echelon]\n", .{});
+            // try self_echelon.print();
+            // std.debug.print("[FINAL b_echelon]\n", .{});
+            // try b_echelon.print();
             return [2]Self{ self_echelon, b_echelon };
         }
         /// LU decomposition (Ref: https://rosettacode.org/wiki/LU_decomposition)
