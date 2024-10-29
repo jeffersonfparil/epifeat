@@ -15,6 +15,7 @@ fn Matrix(comptime T: type) type {
         data: [][]T,
         n: usize,
         p: usize,
+        determinant: ?T,
         const Self = @This();
         /// Initialise a matrix
         pub fn init(n: usize, p: usize, allocator: Allocator) !Self {
@@ -26,6 +27,7 @@ fn Matrix(comptime T: type) type {
                 .data = data,
                 .n = n,
                 .p = p,
+                .determinant = null,
             };
         }
         /// De-initialise a matrix
@@ -189,7 +191,8 @@ fn Matrix(comptime T: type) type {
             return row_indexes;
         }
         /// Gaussian elimination
-        pub fn gaussian_elimination(self: Self, b: Self, allocator: Allocator) ![2]Self {
+        /// Additionally appends the determinant of self
+        pub fn gaussian_elimination(self: *Self, b: Self, allocator: Allocator) ![2]Self {
             // // Make sure the matrix is square
             // if (self.n != self.p) {
             //     return MatrixError.NonSquareMatrix;
@@ -265,6 +268,8 @@ fn Matrix(comptime T: type) type {
             if (@abs(determinant) < @as(T, 0.000001)) {
                 return MatrixError.SingularMatrix;
             }
+            // Update the determinant field of self
+            self.determinant = determinant;
             // Reverse: from the lower-right corner to the upper-left corner
             for (0..self_echelon.n) |i_inverse| {
                 const i = self_echelon.n - (i_inverse + 1);
@@ -288,10 +293,24 @@ fn Matrix(comptime T: type) type {
             // try self_echelon.print();
             // std.debug.print("[FINAL b_echelon]\n", .{});
             // try b_echelon.print();
+            // Update the determinants of the 2 ouput matrices just for completeness
+            self_echelon.determinant = one;
+            for (0..self_echelon.n) |i| {
+                if (i < self_echelon.p) {
+                    self_echelon.determinant.? *= self_echelon.data[i][i];
+                }
+            }
+            b_echelon.determinant = one;
+            for (0..b_echelon.n) |i| {
+                if (i < b_echelon.p) {
+                    b_echelon.determinant.? *= b_echelon.data[i][i];
+                }
+            }
             return [2]Self{ self_echelon, b_echelon };
         }
         /// LU decomposition (Ref: https://rosettacode.org/wiki/LU_decomposition)
-        pub fn lu(self: Self, allocator: Allocator) ![3]Self {
+        /// Additionally appends the determinant of self
+        pub fn lu(self: *Self, allocator: Allocator) ![3]Self {
             // Make sure the matrix is square
             if (self.n != self.p) {
                 return MatrixError.NonSquareMatrix;
@@ -336,21 +355,23 @@ fn Matrix(comptime T: type) type {
                     L.data[i][j] = (self.data[i_a][j] - s2) / U.data[j][j];
                 }
             }
+            // Append the determinants of each matrix including self, P, L, and U
+            P.determinant = one;
+            L.determinant = one;
+            self.determinant = one;
+            for (0..self.n) |i| {
+                self.determinant.? *= U.data[i][i];
+            }
             return [3]Self{ P, L, U };
         }
-
-        // // Determinant
-        // pub fn det(self: Self, allocator: Allocator) !T {
-        //     // LU decomposition
-        //     const P_L_U = try self.lu(allocator);
-        //     // Find the determinant as the product of the diagonal elements of U since the diagonals of L are all one.
-        //     var determinant = P_L_U[1].data[0][0];
-        //     for (0..self.n) |i| {
-        //         determinant *= P_L_U[2].data[i][i];
-        //     }
-        //     std.debug.print("determinant={any}\n", .{determinant});
-        //     return determinant;
-        // }
+        /// QR decomposition (Ref: https://rosettacode.org/wiki/Singular_value_decomposition)
+        pub fn qr(self: *Self, allocator: Allocator) ![2]Self {
+            var Q = try Matrix(T).init_identity(self.n, allocator);
+            var R = try self.clone(allocator);
+            try Q.print();
+            try R.print();
+            return [2]Self{ Q, R };
+        }
     };
 }
 
@@ -545,14 +566,24 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
     // }
 
     // Gaussian elimination
+    var timer = try std.time.Timer.start();
     const echelons = try a.gaussian_elimination(identity, allocator);
+    var time_elapsed = timer.read();
+    std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
+
+    std.debug.print("a={any}\n", .{a});
+
     defer echelons[0].deinit(allocator);
     defer echelons[1].deinit(allocator);
     const a_inverse = echelons[1];
     std.debug.print("echelons[0]\n", .{});
     try echelons[0].print();
+    std.debug.print("echelons[0]={any}\n", .{echelons[0]});
+
     std.debug.print("a_inverse\n", .{});
     try a_inverse.print();
+    std.debug.print("a_inverse={any}\n", .{a_inverse});
+
     const should_be_identity = try a.mult(a_inverse, allocator);
     defer should_be_identity.deinit(allocator);
     std.debug.print("should_be_identity\n", .{});
@@ -570,14 +601,17 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
         }
     }
 
-    var det: f64 = 1.00;
-    for (0..a.n) |i| {
-        det *= echelons[0].data[i][i];
-    }
-    std.debug.print("det={any}\n", .{det});
-
     // LU decomposition
+    timer.reset();
+    time_elapsed = timer.read();
+    std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
+    timer.reset();
     const out_test = try a.lu(allocator);
+    time_elapsed = timer.read();
+    std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
+
+    std.debug.print("a={any}\n", .{a});
+
     defer out_test[0].deinit(allocator);
     defer out_test[1].deinit(allocator);
     defer out_test[2].deinit(allocator);
@@ -587,4 +621,11 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
     try out_test[1].print();
     std.debug.print("out_test[2]\n", .{});
     try out_test[2].print();
+
+    // LU decomposition
+    timer.reset();
+    const out_qr = try a.qr(allocator);
+    time_elapsed = timer.read();
+    std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
+    std.debug.print("out_qr={any}\n", .{out_qr});
 }
