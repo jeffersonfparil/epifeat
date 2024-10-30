@@ -162,36 +162,79 @@ fn Matrix(comptime T: type) type {
             for (0..self.n) |i| {
                 row_indexes[i] = i;
             }
-            // Sort the row indexes by the largest unselected  value per column
-            // We will iterate across rows using the column indexes.
-            // This is because we want to sort the rows according to which column they correspond to the row with the largest value.
-            for (0..self.p) |j| {
-                if (j == self.n) {
-                    break;
-                }
-                // We are setting the sorted index of each row consecutively as iterated over by j, i.e. the jth column.
-                // We therefore skip the previous rows, i.e. setting i_max to the current column index, j.
-                // We iterate across row indexes which are undergoing sorting while skipping the previously sorted rows.
-                var i_max: usize = j;
-                for (row_indexes[j..]) |i| {
-                    if (@abs(self.data[i_max][j]) < @abs(self.data[i][j])) {
-                        i_max = i;
+            var n = self.n;
+            if (self.n > self.p) {
+                n = self.p;
+            }
+            for (row_indexes) |i| {
+                var i_max: usize = i;
+                for (row_indexes[i..]) |j| {
+                    if (@abs(self.data[i_max][i]) < @abs(self.data[j][i])) {
+                        i_max = j;
                     }
                 }
-                // Continue iterating across columns if the sorting index of the row is correct.
-                if (j == i_max) {
-                    continue;
-                }
-                // Swap the index of current/incorrect row index with the correct/sorting index
-                const x0 = row_indexes[j];
-                const x1 = row_indexes[i_max];
-                row_indexes[j] = x1;
-                row_indexes[i_max] = x0;
+                row_indexes[i] = i_max;
+                row_indexes[i_max] = i;
             }
             return row_indexes;
         }
+        /// Forbenius norm
+        pub fn norm_forbenius(self: Self) !T {
+            var sum = self.data[0][0] - self.data[0][0];
+            for (0..self.n) |i| {
+                for (0..self.p) |j| {
+                    sum += @abs(self.data[i][j]) * @abs(self.data[i][j]);
+                }
+            }
+            return std.math.sqrt(sum);
+        }
+        // Add more element-wise norms at some point, e.g. Max norm
+        /// Householder reflection
+        pub fn reflect_householder(self: Self, allocator: Allocator) !Self {
+            // Define constants
+            const constants = try self.define_constants();
+            const zero = constants[0];
+            const one = constants[1];
+            // Define the Forbenius norm
+            const norm_f = try self.norm_forbenius();
+            // V
+            var V = try self.clone(allocator);
+            defer V.deinit(allocator);
+            for (0..self.p) |j| {
+                for (0..self.n) |i| {
+                    var divisor = self.data[0][j];
+                    if (self.data[0][j] >= zero) {
+                        divisor += norm_f;
+                    } else {
+                        divisor -= norm_f;
+                    }
+                    V.data[i][j] = self.data[i][j] / divisor;
+                }
+            }
+            for (0..self.p) |j| {
+                V.data[0][j] = one;
+            }
+            std.debug.print("V:\n", .{});
+            try V.print();
+            // Instantiate the output matrix, H
+            const H = Matrix(T).init_identity(self.p, allocator);
+            var Two_divide_VV = try V.mult(V, allocator);
+            for (0..Two_divide_VV.n) |i| {
+                for (0..Two_divide_VV.p) |j| {
+                    Two_divide_VV.data[i][j] = (one + one) / Two_divide_VV.data[i][j];
+                }
+            }
+            std.debug.print("Two_divide_VV:\n", .{});
+            try Two_divide_VV.print();
+
+            // for (0..Two_divide_VV.n) |i| {
+            //     for (0..Two_divide_VV.p) |j| {}
+            // }
+
+            return H;
+        }
         /// Gaussian elimination
-        /// Additionally appends the determinant of self
+        /// Additionally updates the determinant of self
         pub fn gaussian_elimination(self: *Self, b: Self, allocator: Allocator) ![2]Self {
             // // Make sure the matrix is square
             // if (self.n != self.p) {
@@ -309,7 +352,7 @@ fn Matrix(comptime T: type) type {
             return [2]Self{ self_echelon, b_echelon };
         }
         /// LU decomposition (Ref: https://rosettacode.org/wiki/LU_decomposition)
-        /// Additionally appends the determinant of self
+        /// Additionally updates the determinant of self
         pub fn lu(self: *Self, allocator: Allocator) ![3]Self {
             // Make sure the matrix is square
             if (self.n != self.p) {
@@ -364,7 +407,7 @@ fn Matrix(comptime T: type) type {
             }
             return [3]Self{ P, L, U };
         }
-        /// QR decomposition (Ref: https://rosettacode.org/wiki/Singular_value_decomposition)
+        /// TODO: QR decomposition (Ref: https://rosettacode.org/wiki/Singular_value_decomposition)
         pub fn qr(self: *Self, allocator: Allocator) ![2]Self {
             var Q = try Matrix(T).init_identity(self.n, allocator);
             var R = try self.clone(allocator);
@@ -521,6 +564,55 @@ test "Matrix multiplication" {
     }
 }
 
+test "Pivot, norms, and reflections" {
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    std.debug.print("Pivot and norms", .{});
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    const n: usize = 3;
+    const p: usize = 3;
+    var a = try Matrix(f64).init(n, p, allocator);
+    defer a.deinit(allocator);
+    // Populate with data from Example2 in https://rosettacode.org/wiki/LU_decomposition
+    const contents = [9]f64{ 1, 3, 5, 2, 4, 7, 1, 1, 0 };
+    // const contents = [9]f64{ 2, 9, 4, 7, 5, 3, 6, 1, 8 };
+    for (0..n) |i| {
+        for (0..p) |j| {
+            a.data[i][j] = contents[(i * p) + j];
+        }
+    }
+    std.debug.print("a\n", .{});
+    try a.print();
+
+    // Pivot
+    const row_indexes = try a.pivot(allocator);
+    defer allocator.free(row_indexes);
+    std.debug.print("row_indexes={any}\n", .{row_indexes});
+    const expected_row_indexes = [3]usize{ 1, 0, 2 };
+    for (0..n) |i| {
+        try expect(row_indexes[i] == expected_row_indexes[i]);
+    }
+
+    // Norms
+    const norm_f = try a.norm_forbenius();
+    std.debug.print("norm_f: {any}\n", .{norm_f});
+    try expect(@abs(norm_f - 10.29563) < 0.00001);
+
+    //Reflection
+    var b = try a.clone(allocator);
+    defer b.deinit(allocator);
+    const contents_b = [9]f64{ 12, -51, 4, 6, 167, -68, -4, 24, -41 };
+    for (0..n) |i| {
+        for (0..p) |j| {
+            b.data[i][j] = contents_b[(i * p) + j];
+        }
+    }
+
+    const b_reflect_1 = try b.reflect_householder(allocator);
+    std.debug.print("b_reflect_1: {any}\n", .{b_reflect_1});
+}
+
 test "Gaussian elimination, decompositions, inverses & determinant" {
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
     std.debug.print("Gaussian elimination, decompositions, inverses & determinant", .{});
@@ -555,15 +647,6 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
     std.debug.print("a={any}\n", .{a});
     std.debug.print("b={any}\n", .{b});
     std.debug.print("identity={any}\n", .{identity});
-
-    // Pivot
-    // const row_indexes = try a.pivot(allocator);
-    // defer allocator.free(row_indexes);
-    // std.debug.print("row_indexes={any}\n", .{row_indexes});
-    // const expected_row_indexes = [4]usize{ 0, 2, 1, 3 };
-    // for (0..n) |i| {
-    //     try expect(row_indexes[i] == expected_row_indexes[i]);
-    // }
 
     // Gaussian elimination
     var timer = try std.time.Timer.start();
