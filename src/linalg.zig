@@ -5,6 +5,8 @@ const Allocator: type = std.mem.Allocator;
 const MatrixError = error{
     IncompatibleMatrices,
     NonSquareMatrix,
+    NonHermitian,
+    NotPositiveSemiDefinite,
     NotAColumnVector,
     NotARowVector,
     RowsLessThanColumns,
@@ -96,7 +98,6 @@ fn Matrix(comptime T: type) type {
             // try S.print();
             return S;
         }
-
         /// Matrix multiplication: A*B
         pub fn mult(self: Self, b: Self, allocator: Allocator) !Self {
             if (self.p != b.n) {
@@ -193,6 +194,7 @@ fn Matrix(comptime T: type) type {
         }
         // Add more element-wise norms at some point, e.g. Max norm
         /// Householder reflection
+        /// Applicable to column vectors
         pub fn reflect_householder(self: Self, allocator: Allocator) !Self {
             // Make sure self is a column vector
             if (self.p != 1) {
@@ -239,13 +241,11 @@ fn Matrix(comptime T: type) type {
             // try H.print();
             return H;
         }
-        /// Gaussian elimination
+        /// Gaussian elimination (Ref: my interpretation of using the elementerary row opertaions to convert self into reduced row and column echelon form)
         /// Additionally updates the determinant of self
+        /// Applicable for square and non-square matrices
+        /// Note that non-square matrices do not have determinants
         pub fn gaussian_elimination(self: *Self, b: Self, allocator: Allocator) ![2]Self {
-            // // Make sure the matrix is square
-            // if (self.n != self.p) {
-            //     return MatrixError.NonSquareMatrix;
-            // }
             // Make sure the two matrices have the same number of rows
             if (self.n != b.n) {
                 return MatrixError.IncompatibleMatrices;
@@ -254,8 +254,7 @@ fn Matrix(comptime T: type) type {
             // Define the pivot
             const row_indexes = try self.pivot(allocator);
             defer allocator.free(row_indexes);
-            std.debug.print("row_indexes={any}\n", .{row_indexes});
-
+            // std.debug.print("row_indexes={any}\n", .{row_indexes});
             // Instatiate the pivoted reduced row echelon form matrices of self and b
             var self_echelon = try Matrix(T).init(self.n, self.p, allocator);
             var b_echelon = try Matrix(T).init(b.n, b.p, allocator);
@@ -276,6 +275,9 @@ fn Matrix(comptime T: type) type {
             // Forward: from the upper-left corner to the lower-right corner
             for (0..self_echelon.n) |i| {
                 const a_ii = self_echelon.data[i][i];
+                if (@abs(a_ii) < @as(T, 0.000001)) {
+                    return MatrixError.SingularMatrix;
+                }
                 determinant *= a_ii;
                 // Set the digonals as one
                 for (0..self_echelon.p) |j| {
@@ -306,14 +308,13 @@ fn Matrix(comptime T: type) type {
                 // std.debug.print("Iteration {any}\n", .{i});
                 // try self_echelon.print();
             }
-            // std.debug.print("determinant={any}\n", .{determinant});
             // std.debug.print("[AFTER]\n", .{});
             // try self_echelon.print();
-            if (@abs(determinant) < @as(T, 0.000001)) {
-                return MatrixError.SingularMatrix;
+            // Update the determinant field of self if self is square
+            if (self.n == self.p) {
+                // std.debug.print("determinant={any}\n", .{determinant});
+                self.determinant = determinant;
             }
-            // Update the determinant field of self
-            self.determinant = determinant;
             // Reverse: from the lower-right corner to the upper-left corner
             for (0..self_echelon.n) |i_inverse| {
                 const i = self_echelon.n - (i_inverse + 1);
@@ -337,23 +338,28 @@ fn Matrix(comptime T: type) type {
             // try self_echelon.print();
             // std.debug.print("[FINAL b_echelon]\n", .{});
             // try b_echelon.print();
-            // Update the determinants of the 2 ouput matrices just for completeness
-            self_echelon.determinant = @as(T, 1);
-            for (0..self_echelon.n) |i| {
-                if (i < self_echelon.p) {
-                    self_echelon.determinant.? *= self_echelon.data[i][i];
+            if (self_echelon.n == self_echelon.p) {
+                // Update the determinants of the 2 ouput matrices just for completeness if they are square matrices
+                self_echelon.determinant = @as(T, 1);
+                for (0..self_echelon.n) |i| {
+                    if (i < self_echelon.p) {
+                        self_echelon.determinant.? *= self_echelon.data[i][i];
+                    }
                 }
             }
-            b_echelon.determinant = @as(T, 1);
-            for (0..b_echelon.n) |i| {
-                if (i < b_echelon.p) {
-                    b_echelon.determinant.? *= b_echelon.data[i][i];
+            if (b_echelon.n == b_echelon.p) {
+                b_echelon.determinant = @as(T, 1);
+                for (0..b_echelon.n) |i| {
+                    if (i < b_echelon.p) {
+                        b_echelon.determinant.? *= b_echelon.data[i][i];
+                    }
                 }
             }
             return [2]Self{ self_echelon, b_echelon };
         }
         /// LU decomposition (Ref: https://rosettacode.org/wiki/LU_decomposition)
         /// Additionally updates the determinant of self
+        /// Applicable to square matrices only
         pub fn lu(self: *Self, allocator: Allocator) ![3]Self {
             // Make sure the matrix is square
             if (self.n != self.p) {
@@ -392,6 +398,9 @@ fn Matrix(comptime T: type) type {
                     for (0..j) |k| {
                         s2 += U.data[k][j] * L.data[i][k];
                     }
+                    if (@abs(U.data[j][j]) < @as(T, 0.000001)) {
+                        return MatrixError.SingularMatrix;
+                    }
                     L.data[i][j] = (self.data[i_a][j] - s2) / U.data[j][j];
                 }
             }
@@ -405,6 +414,8 @@ fn Matrix(comptime T: type) type {
             return [3]Self{ P, L, U };
         }
         /// QR decomposition (Ref: https://rosettacode.org/wiki/Singular_value_decomposition)
+        /// Applicable for square and non-square matrices
+        /// Note that the determinant of self is not updated here
         pub fn qr(self: *Self, allocator: Allocator) ![2]Self {
             // Make sure that self has dimensions n >= p
             if (self.n < self.p) {
@@ -423,11 +434,11 @@ fn Matrix(comptime T: type) type {
             for (0..n) |i| {
                 indexes[i] = i;
             }
-            std.debug.print("indexes={any}\n", .{indexes});
+            // std.debug.print("indexes={any}\n", .{indexes});
 
             for (0..p) |j| {
-                std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
-                std.debug.print("j={any}\n", .{j});
+                // std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+                // std.debug.print("j={any}\n", .{j});
                 var H = try Matrix(T).init_identity(n, allocator);
                 const a = try R.slice(indexes[j..], indexes[j..(j + 1)], allocator);
                 // std.debug.print("a:\n", .{});
@@ -440,8 +451,8 @@ fn Matrix(comptime T: type) type {
                         H.data[H_i][H_j] = h.data[h_i][h_j];
                     }
                 }
-                std.debug.print("H:\n", .{});
-                try H.print();
+                // std.debug.print("H:\n", .{});
+                // try H.print();
                 const Q_mult = try Q.mult(H, allocator);
                 defer Q_mult.deinit(allocator);
                 // std.debug.print("Q_mult:\n", .{});
@@ -464,18 +475,65 @@ fn Matrix(comptime T: type) type {
                         }
                     }
                 }
-                std.debug.print("Q:\n", .{});
-                try Q.print();
-                std.debug.print("R:\n", .{});
-                try R.print();
+                // std.debug.print("Q:\n", .{});
+                // try Q.print();
+                // std.debug.print("R:\n", .{});
+                // try R.print();
             }
-
             // std.debug.print("Q:\n", .{});
             // try Q.print();
             // std.debug.print("R:\n", .{});
             // try R.print();
             return [2]Self{ Q, R };
         }
+        /// Cholesky decomposition (Ref: https://rosettacode.org/wiki/Cholesky_decomposition)
+        /// Applicable to square symmetric matrices
+        /// Additionally, this is a Very fast algorithm but requires Hermitian positive-definite matrix!
+        pub fn chol(self: *Self, allocator: Allocator) !Self {
+            // Make sure the self is square
+            if (self.n != self.p) {
+                return MatrixError.NonSquareMatrix;
+            }
+            // Make sure the matrix is Hermitian
+            for (0..self.n) |i| {
+                for (0..self.p) |j| {
+                    if (self.data[i][j] != self.data[j][i]) {
+                        return MatrixError.NonHermitian;
+                    }
+                }
+            }
+            const n = self.p;
+            var L = try Matrix(T).init_fill(n, n, @as(T, 0), allocator);
+            for (0..n) |i| {
+                for (0..(i + 1)) |j| {
+                    var sum = @as(T, 0);
+                    for (0..j) |k| {
+                        sum += L.data[i][k] * L.data[j][k];
+                    }
+                    if (i == j) {
+                        const L_ij_squared = self.data[i][i] - sum;
+                        if (L_ij_squared < @as(T, 0)) {
+                            return MatrixError.NotPositiveSemiDefinite;
+                        }
+                        L.data[i][j] = @sqrt(L_ij_squared);
+                    } else {
+                        if (L.data[j][j] == @as(T, 0)) {
+                            return MatrixError.NotPositiveSemiDefinite;
+                        }
+                        L.data[i][j] = (@as(T, 1) / L.data[j][j]) * (self.data[i][j] - sum);
+                    }
+                    // std.debug.print("@@@@@@@@@@@@@@@@@@@@@\n", .{});
+                    // std.debug.print("i={any}; j={any}:\n", .{ i, j });
+                    // std.debug.print("A:\n", .{});
+                    // try self.print();
+                    // std.debug.print("L:\n", .{});
+                    // try L.print();
+                }
+            }
+            return L;
+        }
+        // /// Singular valude decomposition (Ref: https://builtin.com/articles/svd-algorithm)
+        // pub  fn svd(self: *Self)
     };
 }
 
@@ -786,20 +844,7 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
     try out_test[2].print();
 
     // QR decomposition
-    // var A = try Matrix(f32).init(4, 3, allocator);
-    // const contents_A = [12]f32{ 12, -51, 4, 6, 167, -68, -4, 24, -41, 10, 2, -7 };
-    // for (0..4) |i| {
-    //     for (0..3) |j| {
-    //         const idx = (i * 3) + j;
-    //         A.data[i][j] = contents_A[idx];
-    //     }
-    // }
-    // std.debug.print("A:\n", .{});
-    // try A.print();
-
-    // timer.reset();
-    // const out_qr = try A.qr(allocator);
-
+    // Square matrix and using the inverse to test
     timer.reset();
     const QR = try a.qr(allocator);
     time_elapsed = timer.read();
@@ -832,6 +877,77 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
                 value *= -1.0;
             }
             try expect(value < 0.00001);
+        }
+    }
+    // Non-square matrix where there should be more rows than columns
+    var A = try Matrix(f64).init(4, 3, allocator);
+    const contents_A = [12]f64{ 12, -51, 4, 6, 167, -68, -4, 24, -41, 10, 2, -7 };
+    for (0..4) |i| {
+        for (0..3) |j| {
+            const idx = (i * 3) + j;
+            A.data[i][j] = contents_A[idx];
+        }
+    }
+    std.debug.print("A:\n", .{});
+    try A.print();
+    timer.reset();
+    const QR_A = try A.qr(allocator);
+    time_elapsed = timer.read();
+    var Q_A = QR_A[0];
+    defer Q_A.deinit(allocator);
+    var R_A = QR_A[1];
+    defer R_A.deinit(allocator);
+    std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
+    std.debug.print("Q_A\n", .{});
+    try Q_A.print();
+    std.debug.print("R_A\n", .{});
+    try R_A.print();
+    const expected_Q = [16]f64{ -0.6974858, 0.36350635, -0.30442756, -0.5373086, -0.3487429, -0.91624258, 0.04414177, -0.1921703, 0.2324953, -0.16109590, -0.95061037, 0.1278045, -0.5812382, 0.04909956, -0.04141614, 0.8111942 };
+    const expected_R = [3 * 3]f64{ -17.20465, -18.25088, 15.46094, 0.00000, -175.31944, 70.01976, 0.00000, 0.00000, 35.04559 };
+    for (0..4) |i| {
+        for (0..4) |j| {
+            try expect(@abs(Q_A.data[i][j] - expected_Q[(i * 4) + j]) < 0.00001);
+        }
+    }
+    for (0..3) |i| {
+        for (0..3) |j| {
+            try expect(@abs(R_A.data[i][j] - expected_R[(i * 3) + j]) < 0.00001);
+        }
+    }
+
+    // Cholesky decomposition
+    // const row_indexes = [5]usize{ 0, 1, 2, 3, 4 };
+    // const column_indexes = [1]usize{0};
+    // const c = try a.slice(&row_indexes, &column_indexes, allocator);
+    // var H = try c.mult_bt(c, allocator);
+    var H = try Matrix(f64).init(4, 4, allocator);
+    defer H.deinit(allocator);
+    const contents_H = [16]f64{ 18, 22, 54, 42, 22, 70, 86, 62, 54, 86, 174, 134, 42, 62, 134, 106 };
+    for (0..4) |i| {
+        for (0..4) |j| {
+            H.data[i][j] = contents_H[(i * 4) + j];
+        }
+    }
+    timer.reset();
+    const CHOL = try H.chol(allocator);
+    time_elapsed = timer.read();
+    defer CHOL.deinit(allocator);
+    std.debug.print("CHOL\n", .{});
+    try CHOL.print();
+    std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
+
+    const H_reconstructed = try CHOL.mult_bt(CHOL, allocator);
+    defer H_reconstructed.deinit(allocator);
+
+    std.debug.print("H\n", .{});
+    try H.print();
+
+    std.debug.print("H_reconstructed\n", .{});
+    try H_reconstructed.print();
+
+    for (0..4) |i| {
+        for (0..4) |j| {
+            try expect(@round(H.data[i][j] - H_reconstructed.data[i][j]) < 0.00001);
         }
     }
 }
