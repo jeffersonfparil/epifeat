@@ -2,7 +2,9 @@ const std: type = @import("std");
 const expect = std.testing.expect;
 const Allocator: type = std.mem.Allocator;
 
+/// Error types
 const MatrixError = error{
+    TIsNotAFloatType,
     IncompatibleMatrices,
     NonSquareMatrix,
     NonHermitian,
@@ -15,6 +17,14 @@ const MatrixError = error{
     OutOfMemory,
 };
 
+/// Float type checker of T
+/// We only accept float types here because we do not wat to deal with integer overflows
+/// Used only in Matrix(T).init(...) as all other Matrix instatntiation methods call init.
+pub fn is_float(comptime T: type) bool {
+    const type_info = @typeInfo(T);
+    return type_info == .float;
+}
+
 fn Matrix(comptime T: type) type {
     return struct {
         data: [][]T,
@@ -24,6 +34,9 @@ fn Matrix(comptime T: type) type {
         const Self = @This();
         /// Initialise a matrix
         pub fn init(n: usize, p: usize, allocator: Allocator) !Self {
+            if (!is_float(T)) {
+                return MatrixError.TIsNotAFloatType;
+            }
             const data: [][]T = try allocator.alloc([]T, n);
             for (0..n) |i| {
                 data[i] = try allocator.alloc(T, p);
@@ -67,6 +80,8 @@ fn Matrix(comptime T: type) type {
             return matrix;
         }
         /// Clone a matrix
+        /// We enforce that Self be constant (i.e. *cont Self, i.e. a pointer to a contant self)
+        /// to make sure that self do not change values after cloning.
         pub fn clone(self: *const Self, allocator: Allocator) !Self {
             var copy = try Matrix(T).init(self.n, self.p, allocator);
             for (0..self.n) |i| {
@@ -413,82 +428,88 @@ fn Matrix(comptime T: type) type {
             }
             return [3]Self{ P, L, U };
         }
-        /// QR decomposition (Ref: https://rosettacode.org/wiki/Singular_value_decomposition)
+        /// QR decomposition (Ref: https://rosettacode.org/wiki/QR_decomposition)
         /// Applicable for square and non-square matrices
+        /// Using Householder reflection (looking into using Givens rotation)
         /// Note that the determinant of self is not updated here
-        pub fn qr(self: *Self, allocator: Allocator) ![2]Self {
+        pub fn qr(self: Self, allocator: Allocator) ![2]Self {
             // Make sure that self has dimensions n >= p
             if (self.n < self.p) {
                 return MatrixError.RowsLessThanColumns;
             }
+            // Define the major axis, i.e. the row or column whichever is larger
             const n = self.n;
             var p = self.p;
+            // If self is square then we do not iterate up to the final column (why?)
             if (self.n == self.p) {
                 p -= 1;
             }
+            // Initialise Q and R as identity matrices
             var Q = try Matrix(T).init_identity(n, allocator);
             var R = try self.clone(allocator);
-
+            // Initialise the array of indexes for slicing and Housefolder reflection
             const indexes: []usize = try allocator.alloc(usize, n);
             defer allocator.free(indexes);
             for (0..n) |i| {
                 indexes[i] = i;
             }
-            // std.debug.print("indexes={any}\n", .{indexes});
-
+            // Iterate per column
             for (0..p) |j| {
-                // std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
-                // std.debug.print("j={any}\n", .{j});
+                // Define the Householder reflection matrix for the current iteration
                 var H = try Matrix(T).init_identity(n, allocator);
                 const a = try R.slice(indexes[j..], indexes[j..(j + 1)], allocator);
-                // std.debug.print("a:\n", .{});
-                // try a.print();
                 const h = try a.reflect_householder(allocator);
-                // std.debug.print("h:\n", .{});
-                // try h.print();
                 for (j..n, 0..) |H_i, h_i| {
                     for (j..n, 0..) |H_j, h_j| {
                         H.data[H_i][H_j] = h.data[h_i][h_j];
                     }
                 }
-                // std.debug.print("H:\n", .{});
-                // try H.print();
+                // Multiple Q by the H
                 const Q_mult = try Q.mult(H, allocator);
                 defer Q_mult.deinit(allocator);
-                // std.debug.print("Q_mult:\n", .{});
-                // try Q_mult.print();
+                // Multiple H by R
                 const R_mult = try H.mult(R, allocator);
                 defer R_mult.deinit(allocator);
-                // std.debug.print("R_mult:\n", .{});
-                // try R_mult.print();
+                // Update Q and R
                 for (0..n) |Q_i| {
                     for (0..n) |Q_j| {
                         Q.data[Q_i][Q_j] = Q_mult.data[Q_i][Q_j];
-                        // if (@abs(Q.data[Q_i][Q_j]) < @as(T, 0.00001)) {
-                        //     Q.data[Q_i][Q_j] = @as(T, 0);
-                        // }
                         if (Q_j < R.p) {
                             R.data[Q_i][Q_j] = R_mult.data[Q_i][Q_j];
-                            // if (@abs(R.data[Q_i][Q_j]) < @as(T, 0.00001)) {
-                            //     R.data[Q_i][Q_j] = @as(T, 0);
-                            // }
                         }
                     }
                 }
-                // std.debug.print("Q:\n", .{});
-                // try Q.print();
-                // std.debug.print("R:\n", .{});
-                // try R.print();
             }
-            // std.debug.print("Q:\n", .{});
-            // try Q.print();
-            // std.debug.print("R:\n", .{});
-            // try R.print();
             return [2]Self{ Q, R };
+        }
+        // /// Eigendecompostion via QR algorithm
+        pub fn eigen_QR(self: *Self, allocator: Allocator) ![2]Self {
+            if (self.n != self.p) {
+                return MatrixError.NonSquareMatrix;
+            }
+            const n_iter: usize = self.n;
+            var A = try self.clone(allocator);
+            defer A.deinit(allocator);
+            var QR = try A.qr(allocator);
+            defer QR[0].deinit(allocator);
+            defer QR[1].deinit(allocator);
+            for (0..n_iter) |iter| {
+                A = try QR[1].mult(QR[0], allocator);
+                QR = try A.qr(allocator);
+                std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+                std.debug.print("iter={any}\n", .{iter});
+                try A.print();
+            }
+            var eigenvalues = try Matrix(T).init(n_iter, 1, allocator);
+            for (0..n_iter) |i| {
+                eigenvalues.data[i][0] = A.data[i][i];
+            }
+            // TODO: Extract eigenvectors
+            return [2]Self{ eigenvalues, A };
         }
         /// Cholesky decomposition (Ref: https://rosettacode.org/wiki/Cholesky_decomposition)
         /// Applicable to square symmetric matrices
-        /// Additionally, this is a Very fast algorithm but requires Hermitian positive-definite matrix!
+        /// This is a **very fast** algorithm but requires Hermitian positive-definite matrix!
         pub fn chol(self: *Self, allocator: Allocator) !Self {
             // Make sure the self is square
             if (self.n != self.p) {
@@ -504,6 +525,7 @@ fn Matrix(comptime T: type) type {
             }
             const n = self.p;
             var L = try Matrix(T).init_fill(n, n, @as(T, 0), allocator);
+            var determinant = @as(T, 1);
             for (0..n) |i| {
                 for (0..(i + 1)) |j| {
                     var sum = @as(T, 0);
@@ -529,12 +551,37 @@ fn Matrix(comptime T: type) type {
                     // std.debug.print("L:\n", .{});
                     // try L.print();
                 }
+                determinant *= (L.data[i][i] * L.data[i][i]); // deteterminant is equal to the product of the squares of the diagonal of L
             }
+            // Update the determinant in self and L
+            self.determinant = determinant;
+            L.determinant = determinant;
             return L;
         }
         // /// Singular valude decomposition (Ref: https://builtin.com/articles/svd-algorithm)
         // pub  fn svd(self: *Self)
     };
+}
+
+/// Miscellneous function for illustrative purposes
+/// Matrix multiplication as a function instead of a methos
+pub fn multiply(comptime T: type, A: Matrix(T), B: Matrix(T), allocator: Allocator) !Matrix(T) {
+    if (A.p != B.n) {
+        return MatrixError.IncompatibleMatrices;
+    }
+    const n: usize = A.n;
+    const p: usize = B.p;
+    var product = try Matrix(T).init(n, p, allocator);
+    for (0..n) |i| {
+        for (0..p) |j| {
+            var dot_product: T = A.data[i][0] * B.data[0][j];
+            for (1..A.p) |k| {
+                dot_product += A.data[i][k] * B.data[k][j];
+            }
+            product.data[i][j] = dot_product;
+        }
+    }
+    return product;
 }
 
 test "Initialisations, cloning and slicing" {
@@ -553,6 +600,11 @@ test "Initialisations, cloning and slicing" {
     try expect(a.p == p);
     std.debug.print("a.data[0][0]={?}\n", .{a.data[0][0]});
     std.debug.print("a={any}\n", .{a});
+
+    // Float type assertion
+    const type_error = Matrix(u8).init(10, 123, allocator);
+    try expect(type_error == MatrixError.TIsNotAFloatType);
+
     // Populate with data from Example2 in https://rosettacode.org/wiki/LU_decomposition
     var b = try Matrix(f64).init(n, p, allocator);
     defer b.deinit(allocator);
@@ -696,7 +748,7 @@ test "Matrix multiplication" {
     }
 }
 
-test "Pivot, norms, and reflections" {
+test "Pivot, norms, reflections, and rotations" {
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
     std.debug.print("Pivot and norms", .{});
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
@@ -740,7 +792,8 @@ test "Pivot, norms, and reflections" {
     }
 
     const H = try b.reflect_householder(allocator);
-    std.debug.print("H: {any}\n", .{H});
+    std.debug.print("H:\n", .{});
+    try H.print();
 
     const expected_housholder_reflections = [9]f64{ -0.85714286, -0.42857143, 0.28571429, -0.42857143, 0.9010989, 0.06593407, 0.28571429, 0.06593407, 0.95604396 };
     for (0..n) |i| {
@@ -879,6 +932,7 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
             try expect(value < 0.00001);
         }
     }
+
     // Non-square matrix where there should be more rows than columns
     var A = try Matrix(f64).init(4, 3, allocator);
     const contents_A = [12]f64{ 12, -51, 4, 6, 167, -68, -4, 24, -41, 10, 2, -7 };
@@ -932,7 +986,7 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
     const CHOL = try H.chol(allocator);
     time_elapsed = timer.read();
     defer CHOL.deinit(allocator);
-    std.debug.print("CHOL\n", .{});
+    std.debug.print("CHOL (det={any})\n", .{CHOL.determinant});
     try CHOL.print();
     std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
 
@@ -950,4 +1004,9 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
             try expect(@round(H.data[i][j] - H_reconstructed.data[i][j]) < 0.00001);
         }
     }
+
+    // Eigenvalues and eigenvectors
+    const eigen_out = try a.eigen_QR(allocator);
+    std.debug.print("eigen_out:\n", .{});
+    try eigen_out[0].print();
 }
