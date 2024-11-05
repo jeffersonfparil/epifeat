@@ -22,7 +22,11 @@ const MatrixError = error{
 /// Used only in Matrix(T).init(...) as all other Matrix instatntiation methods call init.
 pub fn is_float(comptime T: type) bool {
     const type_info = @typeInfo(T);
-    return type_info == .float;
+    return 
+(type_info == f16) or 
+(type_info == f32) or
+(type_info == f64) or
+(type_info == f128);
 }
 
 fn Matrix(comptime T: type) type {
