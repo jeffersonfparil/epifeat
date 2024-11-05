@@ -21,12 +21,12 @@ const MatrixError = error{
 /// We only accept float types here because we do not wat to deal with integer overflows
 /// Used only in Matrix(T).init(...) as all other Matrix instatntiation methods call init.
 pub fn is_float(comptime T: type) bool {
-    const type = @typeOf(@as(T, 1));
+    // const typeT = @typeOf(@as(T, 1));
     return 
-(type == f16) or 
-(type == f32) or
-(type == f64) or
-(type == f128);
+(T == f16) or 
+(T == f32) or
+(T == f64) or
+(T == f128);
 }
 
 fn Matrix(comptime T: type) type {
