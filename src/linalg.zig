@@ -21,12 +21,7 @@ const MatrixError = error{
 /// We only accept float types here because we do not wat to deal with integer overflows
 /// Used only in Matrix(T).init(...) as all other Matrix instatntiation methods call init.
 pub fn is_float(comptime T: type) bool {
-    // const typeT = @typeOf(@as(T, 1));
-    return 
-(T == f16) or 
-(T == f32) or
-(T == f64) or
-(T == f128);
+    return (T == f16) or (T == f32) or (T == f64) or (T == f128);
 }
 
 fn Matrix(comptime T: type) type {
@@ -486,31 +481,6 @@ fn Matrix(comptime T: type) type {
             }
             return [2]Self{ Q, R };
         }
-        // /// Eigendecompostion via QR algorithm
-        pub fn eigen_QR(self: *Self, allocator: Allocator) ![2]Self {
-            if (self.n != self.p) {
-                return MatrixError.NonSquareMatrix;
-            }
-            const n_iter: usize = self.n;
-            var A = try self.clone(allocator);
-            defer A.deinit(allocator);
-            var QR = try A.qr(allocator);
-            defer QR[0].deinit(allocator);
-            defer QR[1].deinit(allocator);
-            for (0..n_iter) |iter| {
-                A = try QR[1].mult(QR[0], allocator);
-                QR = try A.qr(allocator);
-                std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
-                std.debug.print("iter={any}\n", .{iter});
-                try A.print();
-            }
-            var eigenvalues = try Matrix(T).init(n_iter, 1, allocator);
-            for (0..n_iter) |i| {
-                eigenvalues.data[i][0] = A.data[i][i];
-            }
-            // TODO: Extract eigenvectors
-            return [2]Self{ eigenvalues, A };
-        }
         /// Cholesky decomposition (Ref: https://rosettacode.org/wiki/Cholesky_decomposition)
         /// Applicable to square symmetric matrices
         /// This is a **very fast** algorithm but requires Hermitian positive-definite matrix!
@@ -562,8 +532,55 @@ fn Matrix(comptime T: type) type {
             L.determinant = determinant;
             return L;
         }
+        /// Eigen decompostion via QR algorithm
+        pub fn eigen_QR(self: *Self, allocator: Allocator) ![2]Self {
+            // TODO: allow for non-square matrices?!
+            if (self.n != self.p) {
+                return MatrixError.NonSquareMatrix;
+            }
+            const n_iter: usize = self.n;
+            var A = try self.clone(allocator);
+            defer A.deinit(allocator);
+            var QR = try A.qr(allocator);
+            defer QR[0].deinit(allocator);
+            defer QR[1].deinit(allocator);
+            var eigenvectors = try QR[0].clone(allocator);
+            for (0..n_iter) |_| {
+                A = try QR[1].mult(QR[0], allocator);
+                QR = try A.qr(allocator);
+                const Q0_x_Q1 = try eigenvectors.mult(QR[0], allocator);
+                defer Q0_x_Q1.deinit(allocator);
+                for (0..n_iter) |i| {
+                    for (0..n_iter) |j| {
+                        eigenvectors.data[i][j] = Q0_x_Q1.data[i][j];
+                    }
+                }
+                // std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+                // std.debug.print("iter={any}\n", .{iter});
+                // try A.print();
+            }
+            var eigenvalues = try Matrix(T).init(n_iter, 1, allocator);
+            for (0..n_iter) |i| {
+                eigenvalues.data[i][0] = A.data[i][i];
+            }
+            return [2]Self{ eigenvalues, eigenvectors };
+        }
+
         // /// Singular valude decomposition (Ref: https://builtin.com/articles/svd-algorithm)
-        // pub  fn svd(self: *Self)
+        pub fn svd(self: *Self, allocator: Allocator) ![2]Self {
+            const eigen = try self.eigen_QR(allocator);
+            var singular_values = eigen[0]; // singular values are the square-roots of the eigenvalues
+            const eigenvectors = eigen[1];
+            defer eigenvectors.deinit(allocator);
+            var singular_vectors = try self.mult(eigenvectors, allocator);
+            for (0..singular_values.n) |i| {
+                singular_values.data[i][0] = @sqrt(singular_values.data[i][0]);
+                for (0..eigenvectors.p) |j| {
+                    singular_vectors.data[i][j] /= singular_values.data[i][0];
+                }
+            }
+            return [2]Self{ singular_vectors, singular_vectors };
+        }
     };
 }
 
@@ -808,37 +825,28 @@ test "Pivot, norms, reflections, and rotations" {
     }
 }
 
-test "Gaussian elimination, decompositions, inverses & determinant" {
+test "Gaussian elimination" {
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
-    std.debug.print("Gaussian elimination, decompositions, inverses & determinant", .{});
+    std.debug.print("Gaussian elimination", .{});
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    // Preliminaries
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     const n: usize = 5;
     const p: usize = 5;
     var a = try Matrix(f64).init(n, p, allocator);
     defer a.deinit(allocator);
-    try expect(a.n == n);
-    try expect(a.p == p);
-    std.debug.print("a.data[0][0]={?}\n", .{a.data[0][0]});
-    std.debug.print("a={any}\n", .{a});
-    // Populate with data from Example2 in https://rosettacode.org/wiki/LU_decomposition
     var b = try Matrix(f64).init(n, p, allocator);
     defer b.deinit(allocator);
-    // const contents = [16]f64{ 11.0, 9.0, 24.0, 2.0, 1.0, 5.0, 2.0, 6.0, 3.0, 17.0, 18.0, 1.0, 2.0, 5.0, 7.0, 1.0 };
     const contents = [25]f64{ 12, 22, 35, 64, 2, 16, 72, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970 };
-    // const contents = [9]f64{ 2, 9, 4, 7, 5, 3, 6, 1, 8 };
-    // const contents = [16]f64{ 2, 2, 3, 4, 2.5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }; // MatrixError.SingularMatrix
     for (0..n) |i| {
         for (0..p) |j| {
             a.data[i][j] = contents[(i * p) + j];
             b.data[j][i] = contents[(i * p) + j];
         }
     }
-    // Identity matrix
     const identity = try Matrix(f64).init_identity(n, allocator);
     defer identity.deinit(allocator);
-
     std.debug.print("a={any}\n", .{a});
     std.debug.print("b={any}\n", .{b});
     std.debug.print("identity={any}\n", .{identity});
@@ -846,7 +854,7 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
     // Gaussian elimination
     var timer = try std.time.Timer.start();
     const echelons = try a.gaussian_elimination(identity, allocator);
-    var time_elapsed = timer.read();
+    const time_elapsed = timer.read();
     std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
 
     std.debug.print("a={any}\n", .{a});
@@ -878,18 +886,40 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
             try expect(value < 0.00001);
         }
     }
+}
+
+test "LU decomposition" {
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    std.debug.print("LU decomposition", .{});
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    // Preliminaries
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    const n: usize = 5;
+    const p: usize = 5;
+    var a = try Matrix(f64).init(n, p, allocator);
+    defer a.deinit(allocator);
+    var b = try Matrix(f64).init(n, p, allocator);
+    defer b.deinit(allocator);
+    const contents = [25]f64{ 12, 22, 35, 64, 2, 16, 72, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970 };
+    for (0..n) |i| {
+        for (0..p) |j| {
+            a.data[i][j] = contents[(i * p) + j];
+            b.data[j][i] = contents[(i * p) + j];
+        }
+    }
+    const identity = try Matrix(f64).init_identity(n, allocator);
+    defer identity.deinit(allocator);
+    std.debug.print("a={any}\n", .{a});
+    std.debug.print("b={any}\n", .{b});
+    std.debug.print("identity={any}\n", .{identity});
 
     // LU decomposition
-    timer.reset();
-    time_elapsed = timer.read();
-    std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
-    timer.reset();
+    var timer = try std.time.Timer.start();
     const out_test = try a.lu(allocator);
-    time_elapsed = timer.read();
+    const time_elapsed = timer.read();
     std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
-
     std.debug.print("a={any}\n", .{a});
-
     defer out_test[0].deinit(allocator);
     defer out_test[1].deinit(allocator);
     defer out_test[2].deinit(allocator);
@@ -899,12 +929,39 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
     try out_test[1].print();
     std.debug.print("out_test[2]\n", .{});
     try out_test[2].print();
+}
+
+test "QR decomposition" {
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    std.debug.print("QR decomposition", .{});
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    // Preliminaries
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    const n: usize = 5;
+    const p: usize = 5;
+    var a = try Matrix(f64).init(n, p, allocator);
+    defer a.deinit(allocator);
+    var b = try Matrix(f64).init(n, p, allocator);
+    defer b.deinit(allocator);
+    const contents = [25]f64{ 12, 22, 35, 64, 2, 16, 72, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970 };
+    for (0..n) |i| {
+        for (0..p) |j| {
+            a.data[i][j] = contents[(i * p) + j];
+            b.data[j][i] = contents[(i * p) + j];
+        }
+    }
+    const identity = try Matrix(f64).init_identity(n, allocator);
+    defer identity.deinit(allocator);
+    std.debug.print("a={any}\n", .{a});
+    std.debug.print("b={any}\n", .{b});
+    std.debug.print("identity={any}\n", .{identity});
 
     // QR decomposition
     // Square matrix and using the inverse to test
-    timer.reset();
+    var timer = try std.time.Timer.start();
     const QR = try a.qr(allocator);
-    time_elapsed = timer.read();
+    var time_elapsed = timer.read();
     var Q = QR[0];
     defer Q.deinit(allocator);
     var R = QR[1];
@@ -972,13 +1029,17 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
             try expect(@abs(R_A.data[i][j] - expected_R[(i * 3) + j]) < 0.00001);
         }
     }
+}
 
-    // Cholesky decomposition
-    // const row_indexes = [5]usize{ 0, 1, 2, 3, 4 };
-    // const column_indexes = [1]usize{0};
-    // const c = try a.slice(&row_indexes, &column_indexes, allocator);
-    // var H = try c.mult_bt(c, allocator);
-    var H = try Matrix(f64).init(4, 4, allocator);
+test "Cholesky decomposition" {
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    std.debug.print("Cholesky decomposition", .{});
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    // Preliminaries
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    const n: usize = 4;
+    var H = try Matrix(f64).init(n, n, allocator);
     defer H.deinit(allocator);
     const contents_H = [16]f64{ 18, 22, 54, 42, 22, 70, 86, 62, 54, 86, 174, 134, 42, 62, 134, 106 };
     for (0..4) |i| {
@@ -986,9 +1047,11 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
             H.data[i][j] = contents_H[(i * 4) + j];
         }
     }
-    timer.reset();
+
+    // Cholesky decomposition
+    var timer = try std.time.Timer.start();
     const CHOL = try H.chol(allocator);
-    time_elapsed = timer.read();
+    const time_elapsed = timer.read();
     defer CHOL.deinit(allocator);
     std.debug.print("CHOL (det={any})\n", .{CHOL.determinant});
     try CHOL.print();
@@ -1008,9 +1071,42 @@ test "Gaussian elimination, decompositions, inverses & determinant" {
             try expect(@round(H.data[i][j] - H_reconstructed.data[i][j]) < 0.00001);
         }
     }
+}
+
+test "Eigen decomposition" {
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    std.debug.print("Eigen decomposition", .{});
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    // Preliminaries
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    const n: usize = 5;
+    const p: usize = 5;
+    var a = try Matrix(f64).init(n, p, allocator);
+    defer a.deinit(allocator);
+    var b = try Matrix(f64).init(n, p, allocator);
+    defer b.deinit(allocator);
+    const contents = [25]f64{ 12, 22, 35, 64, 2, 16, 72, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970 };
+    for (0..n) |i| {
+        for (0..p) |j| {
+            a.data[i][j] = contents[(i * p) + j];
+            b.data[j][i] = contents[(i * p) + j];
+        }
+    }
+    const identity = try Matrix(f64).init_identity(n, allocator);
+    defer identity.deinit(allocator);
+    std.debug.print("a:\n", .{});
+    try a.print();
+    std.debug.print("b={any}\n", .{b});
+    std.debug.print("identity={any}\n", .{identity});
 
     // Eigenvalues and eigenvectors
+    var timer = try std.time.Timer.start();
     const eigen_out = try a.eigen_QR(allocator);
-    std.debug.print("eigen_out:\n", .{});
+    const time_elapsed = timer.read();
+    std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
+    std.debug.print("eigenvalues:\n", .{});
     try eigen_out[0].print();
+    std.debug.print("eigenvectors:\n", .{});
+    try eigen_out[1].print();
 }
