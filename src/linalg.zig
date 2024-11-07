@@ -533,40 +533,49 @@ fn Matrix(comptime T: type) type {
             return L;
         }
         /// Eigen decompostion via QR algorithm
+        /// Applicable to square matrices
+        /// This is a slow implementation of the QR algorithm which uses non-parallelisable Householder reflection.
+        /// TODO: Improve the speed and convergence logic.
         pub fn eigen_QR(self: *Self, allocator: Allocator) ![2]Self {
-            // TODO: allow for non-square matrices?!
             if (self.n != self.p) {
                 return MatrixError.NonSquareMatrix;
             }
-            const n_iter: usize = self.n;
+            const max_iter: usize = 100;
             var A = try self.clone(allocator);
             defer A.deinit(allocator);
             var QR = try A.qr(allocator);
             defer QR[0].deinit(allocator);
             defer QR[1].deinit(allocator);
             var eigenvectors = try QR[0].clone(allocator);
-            for (0..n_iter) |_| {
+            var first_eigenvalue = A.data[0][0];
+            for (0..max_iter) |iter| {
                 A = try QR[1].mult(QR[0], allocator);
+                if ((iter >= self.n) and (@abs(first_eigenvalue - A.data[0][0]) < 0.00001)) {
+                    break;
+                } else {
+                    first_eigenvalue = A.data[0][0];
+                }
                 QR = try A.qr(allocator);
                 const Q0_x_Q1 = try eigenvectors.mult(QR[0], allocator);
                 defer Q0_x_Q1.deinit(allocator);
-                for (0..n_iter) |i| {
-                    for (0..n_iter) |j| {
+                for (0..self.n) |i| {
+                    for (0..self.p) |j| {
                         eigenvectors.data[i][j] = Q0_x_Q1.data[i][j];
                     }
                 }
-                // std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
-                // std.debug.print("iter={any}\n", .{iter});
-                // try A.print();
+                std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+                std.debug.print("iter={any}\n", .{iter});
+                try A.print();
             }
-            var eigenvalues = try Matrix(T).init(n_iter, 1, allocator);
-            for (0..n_iter) |i| {
+            var eigenvalues = try Matrix(T).init(self.n, 1, allocator);
+            for (0..self.n) |i| {
                 eigenvalues.data[i][0] = A.data[i][i];
             }
             return [2]Self{ eigenvalues, eigenvectors };
         }
 
-        // /// Singular valude decomposition (Ref: https://builtin.com/articles/svd-algorithm)
+        /// Singular valude decomposition (Ref: https://builtin.com/articles/svd-algorithm)
+        /// Generalisation of eigendecomposition on non-square matrices
         pub fn svd(self: *Self, allocator: Allocator) ![2]Self {
             const eigen = try self.eigen_QR(allocator);
             var singular_values = eigen[0]; // singular values are the square-roots of the eigenvalues
