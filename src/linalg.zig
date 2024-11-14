@@ -1082,6 +1082,7 @@ test "Cholesky decomposition" {
     }
 }
 
+// TODO: tests
 test "Eigen decomposition" {
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
     std.debug.print("Eigen decomposition", .{});
