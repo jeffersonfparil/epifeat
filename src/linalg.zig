@@ -1,6 +1,6 @@
 const std: type = @import("std");
-const expect = std.testing.expect;
 const Allocator: type = std.mem.Allocator;
+const expect = std.testing.expect;
 
 /// Error types
 const MatrixError = error{
