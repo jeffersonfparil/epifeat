@@ -20,8 +20,8 @@ jobs:
         with:
           version: ${{ matrix.zig-version }}
       - name: Test io.zig
-        run: zig test src/io.zig
+        run: time zig test src/io.zig
       - name: Test linalg.zig
-        run: |
-          time zig test src/linalg.zig
-          time zig test src/stats.zig
+        run: time zig test src/linalg.zig
+      - name: Test stats.zig
+        run: time zig test src/stats.zig
