@@ -535,6 +535,9 @@ fn Matrix(comptime T: type) type {
         /// Eigen decompostion via QR algorithm
         /// Applicable to square matrices
         /// This is a slow implementation of the QR algorithm which uses non-parallelisable Householder reflection.
+        /// TODO: Where are the complex components?
+        /// TODO: Fix singularities in inverting the eigen vectors.
+        /// TODO: try to properly implement Wilkinson's shift with matrix deflation and possibly reordering/pivoting?
         /// TODO: Improve the speed and convergence logic.
         pub fn eigen_QR(self: *Self, allocator: Allocator) ![2]Self {
             if (self.n != self.p) {
@@ -543,19 +546,50 @@ fn Matrix(comptime T: type) type {
             const max_iter: usize = 100;
             var A = try self.clone(allocator);
             defer A.deinit(allocator);
-            var QR = try A.qr(allocator);
-            defer QR[0].deinit(allocator);
-            defer QR[1].deinit(allocator);
-            var eigenvectors = try QR[0].clone(allocator);
-            var first_eigenvalue = A.data[0][0];
+            var eigenvectors = try Matrix(T).init_identity(self.n, allocator);
+            var shifter: T = @as(T, 0);
+            var epsilon: T = @as(T, 1_000); // An arbitrarily large epsilon to begin with (this the the mean absolute difference in eigenvalues between 2 consecutive iterations)
             for (0..max_iter) |iter| {
-                A = try QR[1].mult(QR[0], allocator);
-                if ((iter >= self.n) and (@abs(first_eigenvalue - A.data[0][0]) < 0.00001)) {
-                    break;
-                } else {
-                    first_eigenvalue = A.data[0][0];
+                // Define the shifter (Wilkinson's shift)
+                if (A.n >= 2) {
+                    const a: T = A.data[self.n - 2][self.n - 2];
+                    const b: T = A.data[self.n - 2][self.n - 1];
+                    const c: T = A.data[self.n - 1][self.n - 2];
+                    const d: T = A.data[self.n - 1][self.n - 1];
+                    const B: T = a + d;
+                    const C: T = (a * d) + (b * c);
+                    var REAL_1: T = -B / @as(T, 2);
+                    var REAL_2: T = -B / @as(T, 2);
+                    var IMAGINARY_1: T = @as(T, 0);
+                    var IMAGINARY_2: T = @as(T, 0);
+                    const b2_4ac: T = std.math.pow(T, B, 2) - (@as(T, 4) * @as(T, 1) * C);
+                    if (b2_4ac < 0.0) {
+                        IMAGINARY_1 += @sqrt(-b2_4ac) / @as(T, 2);
+                        IMAGINARY_2 += @sqrt(-b2_4ac) / @as(T, 2);
+                    } else {
+                        REAL_1 += @sqrt(b2_4ac) / @as(T, 2);
+                        REAL_2 += @sqrt(b2_4ac) / @as(T, 2);
+                    }
+                    // Which root is closest to d?
+                    const diff_1: T = @abs((REAL_1 + IMAGINARY_1) - d);
+                    const diff_2: T = @abs((REAL_2 + IMAGINARY_2) - d);
+                    if (diff_1 < diff_2) {
+                        // TODO: handle complex numbers properly
+                        // For now, we are only keeping the real components
+                        shifter = REAL_1;
+                    } else {
+                        shifter = REAL_2;
+                    }
                 }
-                QR = try A.qr(allocator);
+                // Subtract the shifter from A prior to QR decomposition
+                // shifter = A.data[self.n - 1][self.n - 1];
+                for (0..self.n) |i| {
+                    A.data[i][i] -= shifter;
+                }
+                // QR decomposition
+                const QR = try A.qr(allocator);
+                defer QR[0].deinit(allocator);
+                defer QR[1].deinit(allocator);
                 const Q0_x_Q1 = try eigenvectors.mult(QR[0], allocator);
                 defer Q0_x_Q1.deinit(allocator);
                 for (0..self.n) |i| {
@@ -563,8 +597,25 @@ fn Matrix(comptime T: type) type {
                         eigenvectors.data[i][j] = Q0_x_Q1.data[i][j];
                     }
                 }
+                // Reconsititute A
+                A = try QR[1].mult(QR[0], allocator);
+                // Add back the shifter into A
+                for (0..self.n) |i| {
+                    A.data[i][i] += shifter;
+                }
+                // TODO: check for convergence per eigenvalue followed by matrix deflation
+                // Check for convergence
+                epsilon = @as(T, 0);
+                for (0..self.n) |i| {
+                    epsilon += @abs(eigenvectors.data[i][0] - A.data[i][i]);
+                }
+                epsilon /= @floatFromInt(self.n);
+                if ((iter >= self.n) and (epsilon < 0.00001)) {
+                    break;
+                }
+
                 std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
-                std.debug.print("iter={any}\n", .{iter});
+                std.debug.print("iter={any} | epsilon={any}\n", .{ iter, epsilon });
                 try A.print();
             }
             var eigenvalues = try Matrix(T).init(self.n, 1, allocator);
@@ -1119,4 +1170,26 @@ test "Eigen decomposition" {
     try eigen_out[0].print();
     std.debug.print("eigenvectors:\n", .{});
     try eigen_out[1].print();
+
+    var P = try eigen_out[1].clone(allocator);
+    std.debug.print("P:\n", .{});
+    try P.print();
+    var D = try Matrix(f64).init_identity(5, allocator);
+    for (0..5) |i| {
+        D.data[i][i] = eigen_out[0].data[i][0];
+    }
+    std.debug.print("D:\n", .{});
+    try D.print();
+    // TODO: implement complex number operations
+    // TODO: implement per eigenvalue convergence test
+    // TODO: implement A matrix deflation after each eigenvalue convergence
+    // const P_inverse = try P.gaussian_elimination(identity, allocator);
+    // std.debug.print("P_inverse[1]:\n", .{});
+    // try P_inverse[1].print();
+    // const PD = try P.mult(D, allocator);
+    // std.debug.print("PD:\n", .{});
+    // try PD.print();
+    // const a_reconstituted = try PD.mult(P_inverse[1], allocator);
+    // std.debug.print("a_reconstituted:\n", .{});
+    // try a_reconstituted.print();
 }

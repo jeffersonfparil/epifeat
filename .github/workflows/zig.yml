@@ -22,4 +22,6 @@ jobs:
       - name: Test io.zig
         run: zig test src/io.zig
       - name: Test linalg.zig
-        run: zig test src/linalg.zig
+        run: |
+          time zig test src/linalg.zig
+          time zig test src/stats.zig
