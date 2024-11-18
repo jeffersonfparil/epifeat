@@ -535,7 +535,8 @@ fn Matrix(comptime T: type) type {
         /// Eigen decompostion via QR algorithm
         /// Applicable to square matrices
         /// This is a slow implementation of the QR algorithm which uses non-parallelisable Householder reflection.
-        /// TODO: Where are the complex components?
+        /// Where are the complex components? They come from solving the quadratic equation in finiding Wilkinson's shift.
+        /// TODO: Define/implement a complex number data type?
         /// TODO: Fix singularities in inverting the eigen vectors.
         /// TODO: try to properly implement Wilkinson's shift with matrix deflation and possibly reordering/pivoting?
         /// TODO: Improve the speed and convergence logic.
@@ -625,6 +626,7 @@ fn Matrix(comptime T: type) type {
             return [2]Self{ eigenvalues, eigenvectors };
         }
 
+        /// TODO: Implement SVD
         /// Singular valude decomposition (Ref: https://builtin.com/articles/svd-algorithm)
         /// Generalisation of eigendecomposition on non-square matrices
         pub fn svd(self: *Self, allocator: Allocator) ![2]Self {

@@ -1,34 +1,16 @@
 const std = @import("std");
+const expect = std.testing.expect;
 
-pub fn slices(n: u64) !f64 {
-    // var prng = std.rand.DefaultPrng.init(blk: {
-    //     var seed: u64 = undefined;
-    //     try std.posix.getrandom(std.mem.asBytes(&seed));
-    //     break :blk seed;
-    // });
-    var prng = std.rand.DefaultPrng.init(blk: {
-        var seed: u64 = undefined;
-        try std.posix.getrandom(std.mem.asBytes(&seed));
-        break :blk seed;
-    });
-    const rand = prng.random();
-    const allocator = std.heap.page_allocator;
-    var x = std.ArrayList(f64).init(allocator);
-    defer x.deinit();
-    var i: u64 = 0;
-    while (i < n) : (i += 1) {
-        const x_new: f64 = rand.float(f64);
-        try x.append(x_new);
-        std.debug.print("x_new[{?}]={?}\n", .{ i, x_new });
-    }
-    for (x.items, 0..) |s, j| {
-        std.debug.print("x[{?}]={?}\n", .{ j, s });
-    }
-    const out: f64 = 0.0;
-    return out;
+pub fn write(fname: []const u8) ![]const u8 {
+    var file = try std.fs.cwd().createFile(fname, .{});
+    defer file.close();
+    const some_text: *const [40]u8 = "Hello world! Writing a text file in zig.";
+    try file.writeAll(some_text);
+    return fname;
 }
 
-test "slices" {
-    const n: u64 = 10;
-    _ = try slices(n);
+test "io" {
+    const fname = "test.tmp";
+    const out = try write(fname);
+    try expect(std.mem.eql(u8, fname, out));
 }

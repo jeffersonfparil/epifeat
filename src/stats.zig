@@ -164,7 +164,6 @@ pub fn quantile_univariate_gaussian(p: []const f64, mu: f64, sd: f64, lower_tail
     return out;
 }
 
-// TODO: tests
 test "stats" {
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
     std.debug.print("Mean", .{});
@@ -176,8 +175,13 @@ test "stats" {
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
     std.debug.print("Uniform distribution", .{});
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // const allocator = gpa.allocator();
+    // Arena allocator can be faster than the general purpose allocator
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const x_unif = try samnple_unif(1_000_000, -1.00, 1.00, allocator);
     defer allocator.free(x_unif);
     // std.debug.print("x_unif={any}\n", .{x_unif});
