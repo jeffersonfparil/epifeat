@@ -21,7 +21,49 @@ const MatrixError = error{
 /// We only accept float types here because we do not wat to deal with integer overflows
 /// Used only in Matrix(T).init(...) as all other Matrix instatntiation methods call init.
 pub fn is_float(comptime T: type) bool {
-    return (T == f16) or (T == f32) or (T == f64) or (T == f128);
+    return (T == f16) or (T == f32) or (T == f64) or (T == f128) or (T == std.math.complex.Complex(f16)) or (T == std.math.complex.Complex(f32)) or (T == std.math.complex.Complex(f64)) or (T == std.math.complex.Complex(f128));
+}
+
+/// Generic arithmetic math operations for primitive float types and complex numbers class
+fn add(comptime T: type, a: T, b: T) T {
+    var out: T = undefined;
+    if ((T == std.math.complex.Complex(f16)) or (T == std.math.complex.Complex(f32)) or (T == std.math.complex.Complex(f64)) or (T == std.math.complex.Complex(f128))) {
+        out = a.add(b);
+    } else {
+        out = a + b;
+    }
+    return (out);
+}
+
+fn multiply(comptime T: type, a: T, b: T) T {
+    var out: T = undefined;
+    if ((T == std.math.complex.Complex(f16)) or (T == std.math.complex.Complex(f32)) or (T == std.math.complex.Complex(f64)) or (T == std.math.complex.Complex(f128))) {
+        out = a.mul(b);
+    } else {
+        out = a * b;
+    }
+    return (out);
+}
+
+fn abs(comptime T: type, a: T) T {
+    var out: T = undefined;
+    if ((T == std.math.complex.Complex(f16)) or (T == std.math.complex.Complex(f32)) or (T == std.math.complex.Complex(f64)) or (T == std.math.complex.Complex(f128))) {
+        const F = @TypeOf(a.re);
+        out = std.math.Complex(F).init(@sqrt((a.re * a.re) + (a.im * a.im)), 0.0);
+    } else {
+        out = @abs(a);
+    }
+    return (out);
+}
+
+fn less_than(comptime T: type, a: T, b: T) bool {
+    if ((T == std.math.complex.Complex(f16)) or (T == std.math.complex.Complex(f32)) or (T == std.math.complex.Complex(f64)) or (T == std.math.complex.Complex(f128))) {
+        const z_a: f64 = @sqrt((a.re * a.re) + (a.im * a.im));
+        const z_b: f64 = @sqrt((b.re * b.re) + (b.im * b.im));
+        return (z_a < z_b);
+    } else {
+        return (a < b);
+    }
 }
 
 fn Matrix(comptime T: type) type {
@@ -122,9 +164,9 @@ fn Matrix(comptime T: type) type {
             var product = try Matrix(T).init(n, p, allocator);
             for (0..n) |i| {
                 for (0..p) |j| {
-                    var dot_product: T = self.data[i][0] * b.data[0][j];
+                    var dot_product: T = multiply(T, self.data[i][0], b.data[0][j]);
                     for (1..self.p) |k| {
-                        dot_product += self.data[i][k] * b.data[k][j];
+                        dot_product = add(T, dot_product, multiply(T, self.data[i][k], b.data[k][j]));
                     }
                     product.data[i][j] = dot_product;
                 }
@@ -142,9 +184,9 @@ fn Matrix(comptime T: type) type {
             var product = try Matrix(T).init(n, p, allocator);
             for (0..n) |i| {
                 for (0..p) |j| {
-                    var dot_product: T = self.data[i][0] * b.data[j][0]; // transposed b
+                    var dot_product: T = multiply(T, self.data[i][0], b.data[j][0]); // transposed b
                     for (1..self.p) |k| {
-                        dot_product += self.data[i][k] * b.data[j][k]; // transposed b
+                        dot_product = add(T, dot_product, multiply(T, self.data[i][k], b.data[j][k])); // transposed b
                     }
                     product.data[i][j] = dot_product;
                 }
@@ -162,9 +204,9 @@ fn Matrix(comptime T: type) type {
             var product = try Matrix(T).init(n, p, allocator);
             for (0..n) |i| {
                 for (0..p) |j| {
-                    var dot_product: T = self.data[0][i] * b.data[0][j]; // transposed a
+                    var dot_product: T = multiply(T, self.data[0][i], b.data[0][j]); // transposed a
                     for (1..self.n) |k| {
-                        dot_product += self.data[k][i] * b.data[k][j]; // transposed a
+                        dot_product = add(T, dot_product, multiply(T, self.data[k][i], b.data[k][j])); // transposed a
                     }
                     product.data[i][j] = dot_product;
                 }
@@ -187,7 +229,7 @@ fn Matrix(comptime T: type) type {
             for (row_indexes) |i| {
                 var i_max: usize = i;
                 for (row_indexes[i..]) |j| {
-                    if (@abs(self.data[i_max][i]) < @abs(self.data[j][i])) {
+                    if (abs(T, self.data[i_max][i]) < abs(T, self.data[j][i])) {
                         i_max = j;
                     }
                 }
@@ -201,7 +243,7 @@ fn Matrix(comptime T: type) type {
             var sum = self.data[0][0] - self.data[0][0];
             for (0..self.n) |i| {
                 for (0..self.p) |j| {
-                    sum += @abs(self.data[i][j]) * @abs(self.data[i][j]);
+                    sum += abs(T, self.data[i][j]) * abs(T, self.data[i][j]);
                 }
             }
             return std.math.sqrt(sum);
@@ -289,7 +331,7 @@ fn Matrix(comptime T: type) type {
             // Forward: from the upper-left corner to the lower-right corner
             for (0..self_echelon.n) |i| {
                 const a_ii = self_echelon.data[i][i];
-                if (@abs(a_ii) < @as(T, 0.000001)) {
+                if (abs(T, a_ii) < @as(T, 0.000001)) {
                     return MatrixError.SingularMatrix;
                 }
                 determinant *= a_ii;
@@ -412,7 +454,7 @@ fn Matrix(comptime T: type) type {
                     for (0..j) |k| {
                         s2 += U.data[k][j] * L.data[i][k];
                     }
-                    if (@abs(U.data[j][j]) < @as(T, 0.000001)) {
+                    if (abs(T, U.data[j][j]) < @as(T, 0.000001)) {
                         return MatrixError.SingularMatrix;
                     }
                     L.data[i][j] = (self.data[i_a][j] - s2) / U.data[j][j];
@@ -572,9 +614,17 @@ fn Matrix(comptime T: type) type {
                         REAL_2 += @sqrt(b2_4ac) / @as(T, 2);
                     }
                     // Which root is closest to d?
-                    const diff_1: T = @abs((REAL_1 + IMAGINARY_1) - d);
-                    const diff_2: T = @abs((REAL_2 + IMAGINARY_2) - d);
-                    if (diff_1 < diff_2) {
+                    // const diff_1: T = abs(T, (REAL_1 + IMAGINARY_1) - d);
+                    // const diff_2: T = abs(T, (REAL_2 + IMAGINARY_2) - d);
+
+                    const complex_d = std.math.Complex(T).init(d, 0.0);
+                    const complex_1 = std.math.Complex(T).init(REAL_1, IMAGINARY_1);
+                    const complex_2 = std.math.Complex(T).init(REAL_2, IMAGINARY_2);
+
+                    const diff_1 = abs(std.math.complex.Complex(T), complex_1.sub(complex_d));
+                    const diff_2 = abs(std.math.complex.Complex(T), complex_2.sub(complex_d));
+
+                    if (less_than(std.math.complex.Complex(T), diff_1, diff_2)) {
                         // TODO: handle complex numbers properly
                         // For now, we are only keeping the real components
                         shifter = REAL_1;
@@ -583,7 +633,6 @@ fn Matrix(comptime T: type) type {
                     }
                 }
                 // Subtract the shifter from A prior to QR decomposition
-                // shifter = A.data[self.n - 1][self.n - 1];
                 for (0..self.n) |i| {
                     A.data[i][i] -= shifter;
                 }
@@ -608,7 +657,7 @@ fn Matrix(comptime T: type) type {
                 // Check for convergence
                 epsilon = @as(T, 0);
                 for (0..self.n) |i| {
-                    epsilon += @abs(eigenvectors.data[i][0] - A.data[i][i]);
+                    epsilon += abs(T, eigenvectors.data[i][0] - A.data[i][i]);
                 }
                 epsilon /= @floatFromInt(self.n);
                 if ((iter >= self.n) and (epsilon < 0.00001)) {
@@ -644,27 +693,6 @@ fn Matrix(comptime T: type) type {
             return [2]Self{ singular_vectors, singular_vectors };
         }
     };
-}
-
-/// Miscellneous function for illustrative purposes
-/// Matrix multiplication as a function instead of a methos
-pub fn multiply(comptime T: type, A: Matrix(T), B: Matrix(T), allocator: Allocator) !Matrix(T) {
-    if (A.p != B.n) {
-        return MatrixError.IncompatibleMatrices;
-    }
-    const n: usize = A.n;
-    const p: usize = B.p;
-    var product = try Matrix(T).init(n, p, allocator);
-    for (0..n) |i| {
-        for (0..p) |j| {
-            var dot_product: T = A.data[i][0] * B.data[0][j];
-            for (1..A.p) |k| {
-                dot_product += A.data[i][k] * B.data[k][j];
-            }
-            product.data[i][j] = dot_product;
-        }
-    }
-    return product;
 }
 
 test "Initialisations, cloning and slicing" {
@@ -864,7 +892,7 @@ test "Pivot, norms, reflections, and rotations" {
     // Norms
     const norm_f = try a.norm_forbenius();
     std.debug.print("norm_f: {any}\n", .{norm_f});
-    try expect(@abs(norm_f - 10.29563) < 0.00001);
+    try expect(abs(f64, norm_f - 10.29563) < 0.00001);
 
     //Reflection
     var b = try Matrix(f64).init(p, 1, allocator);
@@ -882,7 +910,7 @@ test "Pivot, norms, reflections, and rotations" {
     for (0..n) |i| {
         for (0..n) |j| {
             const k = (i * n) + j;
-            try expect(@abs(H.data[i][j] - expected_housholder_reflections[k]) < 0.00001);
+            try expect(abs(f64, H.data[i][j] - expected_housholder_reflections[k]) < 0.00001);
         }
     }
 }
@@ -1083,12 +1111,12 @@ test "QR decomposition" {
     const expected_R = [3 * 3]f64{ -17.20465, -18.25088, 15.46094, 0.00000, -175.31944, 70.01976, 0.00000, 0.00000, 35.04559 };
     for (0..4) |i| {
         for (0..4) |j| {
-            try expect(@abs(Q_A.data[i][j] - expected_Q[(i * 4) + j]) < 0.00001);
+            try expect(abs(f64, Q_A.data[i][j] - expected_Q[(i * 4) + j]) < 0.00001);
         }
     }
     for (0..3) |i| {
         for (0..3) |j| {
-            try expect(@abs(R_A.data[i][j] - expected_R[(i * 3) + j]) < 0.00001);
+            try expect(abs(f64, R_A.data[i][j] - expected_R[(i * 3) + j]) < 0.00001);
         }
     }
 }
@@ -1182,6 +1210,12 @@ test "Eigen decomposition" {
     }
     std.debug.print("D:\n", .{});
     try D.print();
+
+    // TODO: Implement math operations for primitive math type and complex number class
+    // const d: f64 = 0.0;
+    // const e: f64 = 1.0;
+    // const f: f64 = d.sum(e);
+    // std.debug.print("f={any}\n", .{f});
     // TODO: implement complex number operations
     // TODO: implement per eigenvalue convergence test
     // TODO: implement A matrix deflation after each eigenvalue convergence
