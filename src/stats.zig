@@ -175,11 +175,11 @@ test "stats" {
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
     std.debug.print("Uniform distribution", .{});
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
-    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // var gpa = std.heap.GeneralPurposeAllocator(.{}){}; // defer is autimatically executed after we return, i.e. when we go beyon the scope in which gpa was created
     // const allocator = gpa.allocator();
     // Arena allocator can be faster than the general purpose allocator
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+    defer arena.deinit(); // We need to deinit manually because the memory came from the OS via the page allocator.
     const allocator = arena.allocator();
 
     const x_unif = try samnple_unif(1_000_000, -1.00, 1.00, allocator);

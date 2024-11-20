@@ -1,6 +1,7 @@
 const std: type = @import("std");
 const Allocator: type = std.mem.Allocator;
 const expect = std.testing.expect;
+const Complex = std.math.complex.Complex;
 
 /// Error types
 const MatrixError = error{
@@ -14,6 +15,7 @@ const MatrixError = error{
     RowsLessThanColumns,
     SingularMatrix,
     NullDataInMatrix,
+    ComplexNumber,
     OutOfMemory,
 };
 
@@ -21,13 +23,23 @@ const MatrixError = error{
 /// We only accept float types here because we do not wat to deal with integer overflows
 /// Used only in Matrix(T).init(...) as all other Matrix instatntiation methods call init.
 pub fn is_float(comptime T: type) bool {
-    return (T == f16) or (T == f32) or (T == f64) or (T == f128) or (T == std.math.complex.Complex(f16)) or (T == std.math.complex.Complex(f32)) or (T == std.math.complex.Complex(f64)) or (T == std.math.complex.Complex(f128));
+    return (T == f16) or (T == f32) or (T == f64) or (T == f128) or (T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128));
 }
 
 /// Generic arithmetic math operations for primitive float types and complex numbers class
+fn as(comptime C: type, comptime T: type, a: C) T {
+    var out: T = undefined;
+    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+        out = Complex(C).init(a, 0.0);
+    } else {
+        out = @as(T, a);
+    }
+    return out;
+}
+
 fn add(comptime T: type, a: T, b: T) T {
     var out: T = undefined;
-    if ((T == std.math.complex.Complex(f16)) or (T == std.math.complex.Complex(f32)) or (T == std.math.complex.Complex(f64)) or (T == std.math.complex.Complex(f128))) {
+    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
         out = a.add(b);
     } else {
         out = a + b;
@@ -35,9 +47,19 @@ fn add(comptime T: type, a: T, b: T) T {
     return (out);
 }
 
+fn subtract(comptime T: type, a: T, b: T) T {
+    var out: T = undefined;
+    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+        out = a.sub(b);
+    } else {
+        out = a - b;
+    }
+    return (out);
+}
+
 fn multiply(comptime T: type, a: T, b: T) T {
     var out: T = undefined;
-    if ((T == std.math.complex.Complex(f16)) or (T == std.math.complex.Complex(f32)) or (T == std.math.complex.Complex(f64)) or (T == std.math.complex.Complex(f128))) {
+    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
         out = a.mul(b);
     } else {
         out = a * b;
@@ -45,24 +67,77 @@ fn multiply(comptime T: type, a: T, b: T) T {
     return (out);
 }
 
-fn abs(comptime T: type, a: T) T {
+fn divide(comptime T: type, a: T, b: T) T {
     var out: T = undefined;
-    if ((T == std.math.complex.Complex(f16)) or (T == std.math.complex.Complex(f32)) or (T == std.math.complex.Complex(f64)) or (T == std.math.complex.Complex(f128))) {
-        const F = @TypeOf(a.re);
-        out = std.math.Complex(F).init(@sqrt((a.re * a.re) + (a.im * a.im)), 0.0);
+    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+        out = a.div(b);
+    } else {
+        out = a / b;
+    }
+    return (out);
+}
+
+fn square_root(comptime T: type, a: T) T {
+    var out: T = undefined;
+    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+        out = a.sqrt();
+    } else {
+        out = @sqrt(a);
+    }
+    return (out);
+}
+
+fn negative(comptime T: type, a: T) T {
+    var out: T = undefined;
+    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+        out = a.neg();
+    } else {
+        out = -a;
+    }
+    return (out);
+}
+
+fn absolute(comptime T: type, a: T) T {
+    var out: T = undefined;
+    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+        const F: type = @TypeOf(a.re);
+        out = Complex(F).init(@sqrt((a.re * a.re) + (a.im * a.im)), 0.0);
     } else {
         out = @abs(a);
     }
     return (out);
 }
 
+fn equal_to(comptime T: type, a: T, b: T) bool {
+    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+        const F: type = @TypeOf(a.re);
+        const z_a: F = a.magnitude();
+        const z_b: F = b.magnitude();
+        return (z_a == z_b);
+    } else {
+        return (a == b);
+    }
+}
+
 fn less_than(comptime T: type, a: T, b: T) bool {
-    if ((T == std.math.complex.Complex(f16)) or (T == std.math.complex.Complex(f32)) or (T == std.math.complex.Complex(f64)) or (T == std.math.complex.Complex(f128))) {
-        const z_a: f64 = @sqrt((a.re * a.re) + (a.im * a.im));
-        const z_b: f64 = @sqrt((b.re * b.re) + (b.im * b.im));
+    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+        const F: type = @TypeOf(a.re);
+        const z_a: F = a.magnitude();
+        const z_b: F = b.magnitude();
         return (z_a < z_b);
     } else {
         return (a < b);
+    }
+}
+
+fn greater_than(comptime T: type, a: T, b: T) bool {
+    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+        const F: type = @TypeOf(a.re);
+        const z_a: F = a.magnitude();
+        const z_b: F = b.magnitude();
+        return (z_a > z_b);
+    } else {
+        return (a > b);
     }
 }
 
@@ -102,9 +177,9 @@ fn Matrix(comptime T: type) type {
             for (0..n) |i| {
                 for (0..n) |j| {
                     if (i == j) {
-                        identity.data[i][j] = @as(T, 1);
+                        identity.data[i][j] = as(f64, T, 1.0);
                     } else {
-                        identity.data[i][j] = @as(T, 0);
+                        identity.data[i][j] = as(f64, T, 0.0);
                     }
                 }
             }
@@ -132,15 +207,96 @@ fn Matrix(comptime T: type) type {
             }
             return copy;
         }
+        /// Clone a matrix and convert T from non-complex into complex numbers
+        pub fn clone_into_complex(self: *const Self, allocator: Allocator) !Matrix(Complex(T)) {
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                return MatrixError.ComplexNumber;
+            }
+            var copy = try Matrix(Complex(T)).init(self.n, self.p, allocator);
+            for (0..self.n) |i| {
+                for (0..self.p) |j| {
+                    copy.data[i][j] = Complex(T).init(self.data[i][j], 0.0);
+                }
+            }
+            return copy;
+        }
+        /// Initialise a complex matrix
+        pub fn init_complex(n: usize, p: usize, allocator: Allocator) !Matrix(Complex(T)) {
+            const a = try Matrix(T).init(n, p, allocator);
+            defer a.deinit(allocator);
+            const b = try a.clone_into_complex(allocator);
+            return b;
+        }
+        /// Initialise an identity complex matrix
+        pub fn init_identity_complex(n: usize, allocator: Allocator) !Matrix(Complex(T)) {
+            const a = try Matrix(T).init_identity(n, allocator);
+            defer a.deinit(allocator);
+            const b = try a.clone_into_complex(allocator);
+            return b;
+        }
+        /// Initialise a complex matrix filled with a value
+        pub fn init_fill_complex(n: usize, p: usize, value: T, allocator: Allocator) !Matrix(Complex(T)) {
+            const a = try Matrix(T).init_fill(n, p, value, allocator);
+            defer a.deinit(allocator);
+            const b = try a.clone_into_complex(allocator);
+            return b;
+        }
         /// Print matrix
         pub fn print(self: Self) !void {
-            for (0..self.n) |i| {
-                std.debug.print("{d:.2}\n", .{self.data[i]});
+            var n: usize = self.n;
+            var p: usize = self.p;
+            if (n > 30) {
+                n = 30;
+            }
+            if (p > 7) {
+                p = 7;
+            }
+            for (0..n) |i| {
+                if (i == 0) {
+                    std.debug.print("⎡ ", .{});
+                } else if (i < (n - 1)) {
+                    std.debug.print("⎢ ", .{});
+                } else {
+                    std.debug.print("⎣ ", .{});
+                }
+                for (0..p) |j| {
+                    if (((p < self.p) and (j == (p - 1))) or ((n < self.n) and (i == (n - 1)))) {
+                        std.debug.print("... ", .{});
+                    } else {
+                        if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                            if (self.data[i][j].re > 0.0) {
+                                std.debug.print(" ", .{});
+                            }
+                            std.debug.print("{e:.2}+{e:.2}i ", .{ self.data[i][j].re, self.data[i][j].im });
+                        } else {
+                            if (self.data[i][j] > 0.0) {
+                                std.debug.print(" ", .{});
+                            }
+                            std.debug.print("{e:.2} ", .{self.data[i][j]});
+                        }
+                    }
+                    if ((i == 0) and (j == (p - 1))) {
+                        std.debug.print("⎤", .{});
+                    }
+                }
+                if ((i != 0) and (i < (n - 1))) {
+                    std.debug.print("⎥", .{});
+                }
+                if (i == (n - 1)) {
+                    std.debug.print("⎦", .{});
+                }
+                std.debug.print("\n", .{});
             }
         }
         /// Slice matrix
         pub fn slice(self: Self, row_indexes: []const usize, column_indexes: []const usize, allocator: Allocator) !Self {
-            var S = try Matrix(T).init(row_indexes.len, column_indexes.len, allocator);
+            var S: Self = undefined;
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                const F: type = @TypeOf(self.data[0][0]);
+                S = try Matrix(F).init_complex(row_indexes.len, column_indexes.len, allocator);
+            } else {
+                S = try Matrix(T).init(row_indexes.len, column_indexes.len, allocator);
+            }
             var idx_i: usize = 0;
             for (row_indexes) |i| {
                 var idx_j: usize = 0;
@@ -161,7 +317,13 @@ fn Matrix(comptime T: type) type {
             }
             const n: usize = self.n;
             const p: usize = b.p;
-            var product = try Matrix(T).init(n, p, allocator);
+            var product: Self = undefined;
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                const F: type = @TypeOf(self.data[0][0]);
+                product = try Matrix(F).init_complex(n, p, allocator);
+            } else {
+                product = try Matrix(T).init(n, p, allocator);
+            }
             for (0..n) |i| {
                 for (0..p) |j| {
                     var dot_product: T = multiply(T, self.data[i][0], b.data[0][j]);
@@ -181,7 +343,13 @@ fn Matrix(comptime T: type) type {
             }
             const n: usize = self.n;
             const p: usize = b.n; // transposed b
-            var product = try Matrix(T).init(n, p, allocator);
+            var product: Self = undefined;
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                const F: type = @TypeOf(self.data[0][0]);
+                product = try Matrix(F).init_complex(n, p, allocator);
+            } else {
+                product = try Matrix(T).init(n, p, allocator);
+            }
             for (0..n) |i| {
                 for (0..p) |j| {
                     var dot_product: T = multiply(T, self.data[i][0], b.data[j][0]); // transposed b
@@ -201,7 +369,13 @@ fn Matrix(comptime T: type) type {
             }
             const n: usize = self.p; // transposed a
             const p: usize = b.p;
-            var product = try Matrix(T).init(n, p, allocator);
+            var product: Self = undefined;
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                const F: type = @TypeOf(self.data[0][0]);
+                product = try Matrix(F).init_complex(n, p, allocator);
+            } else {
+                product = try Matrix(T).init(n, p, allocator);
+            }
             for (0..n) |i| {
                 for (0..p) |j| {
                     var dot_product: T = multiply(T, self.data[0][i], b.data[0][j]); // transposed a
@@ -229,7 +403,7 @@ fn Matrix(comptime T: type) type {
             for (row_indexes) |i| {
                 var i_max: usize = i;
                 for (row_indexes[i..]) |j| {
-                    if (abs(T, self.data[i_max][i]) < abs(T, self.data[j][i])) {
+                    if (less_than(T, absolute(T, self.data[i_max][i]), absolute(T, self.data[j][i]))) {
                         i_max = j;
                     }
                 }
@@ -243,7 +417,7 @@ fn Matrix(comptime T: type) type {
             var sum = self.data[0][0] - self.data[0][0];
             for (0..self.n) |i| {
                 for (0..self.p) |j| {
-                    sum += abs(T, self.data[i][j]) * abs(T, self.data[i][j]);
+                    sum = add(T, sum, absolute(T, self.data[i][j]) * absolute(T, self.data[i][j]));
                 }
             }
             return std.math.sqrt(sum);
@@ -263,7 +437,7 @@ fn Matrix(comptime T: type) type {
             var normal_vector = try self.clone(allocator);
             defer normal_vector.deinit(allocator);
             var divisor = self.data[0][0];
-            if (self.data[0][0] >= @as(T, 0)) {
+            if (greater_than(T, self.data[0][0], as(f64, T, 0.0)) or equal_to(T, self.data[0][0], as(f64, T, 0.0))) {
                 divisor += frobenius_norm;
             } else {
                 divisor -= frobenius_norm;
@@ -271,15 +445,20 @@ fn Matrix(comptime T: type) type {
             for (0..n) |i| {
                 normal_vector.data[i][0] = self.data[i][0] / divisor;
             }
-            normal_vector.data[0][0] = @as(T, 1); // set the origin, i.e. first element as 1
+            normal_vector.data[0][0] = as(f64, T, 1.0); // set the origin, i.e. first element as 1
             // std.debug.print("normal_vector:\n", .{});
             // try normal_vector.print();
             // Instantiate the output matrix, H
-            const H = try Matrix(T).init_identity(n, allocator);
+            var H: Self = undefined;
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                H = try Matrix(T).init_identity_complex(n, allocator);
+            } else {
+                H = try Matrix(T).init_identity(n, allocator);
+            }
             // Define the multiplier
             const M = try normal_vector.mult_at(normal_vector, allocator);
             defer M.deinit(allocator);
-            const multiplier = @as(T, 2) / M.data[0][0]; // 2 / vT*v
+            const multiplier = divide(T, as(f64, T, 2.00), M.data[0][0]); // 2 / vT*v
             // std.debug.print("M:\n", .{});
             // try M.print();
             // Define the v*vT matrix
@@ -290,7 +469,7 @@ fn Matrix(comptime T: type) type {
             // Build the Householder matrix
             for (0..n) |i| {
                 for (0..n) |j| {
-                    H.data[i][j] -= multiplier * S.data[i][j];
+                    H.data[i][j] = subtract(T, H.data[i][j], multiply(T, multiplier, S.data[i][j]));
                 }
             }
             // std.debug.print("H:\n", .{});
@@ -306,17 +485,25 @@ fn Matrix(comptime T: type) type {
             if (self.n != b.n) {
                 return MatrixError.IncompatibleMatrices;
             }
-            var determinant = @as(T, 1);
+            var determinant = as(f64, T, 1.00);
             // Define the pivot
             const row_indexes = try self.pivot(allocator);
             defer allocator.free(row_indexes);
             // std.debug.print("row_indexes={any}\n", .{row_indexes});
             // Instatiate the pivoted reduced row echelon form matrices of self and b
-            var self_echelon = try Matrix(T).init(self.n, self.p, allocator);
-            var b_echelon = try Matrix(T).init(b.n, b.p, allocator);
+            var self_echelon: Self = undefined;
+            var b_echelon: Self = undefined;
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                const F: type = @TypeOf(self.data[0][0]);
+                self_echelon = try Matrix(F).init_complex(self.n, self.p, allocator);
+                b_echelon = try Matrix(F).init_complex(b.n, b.p, allocator);
+            } else {
+                self_echelon = try Matrix(T).init(self.n, self.p, allocator);
+                b_echelon = try Matrix(T).init(b.n, b.p, allocator);
+            }
             for (row_indexes, 0..) |i_pivot, i| {
                 if (i_pivot != i) {
-                    determinant = -determinant;
+                    determinant = negative(T, determinant);
                 }
                 for (0..self.p) |j| {
                     self_echelon.data[i][j] = self.data[i_pivot][j];
@@ -331,18 +518,18 @@ fn Matrix(comptime T: type) type {
             // Forward: from the upper-left corner to the lower-right corner
             for (0..self_echelon.n) |i| {
                 const a_ii = self_echelon.data[i][i];
-                if (abs(T, a_ii) < @as(T, 0.000001)) {
+                if (less_than(T, absolute(T, a_ii), as(f64, T, 0.000001))) {
                     return MatrixError.SingularMatrix;
                 }
-                determinant *= a_ii;
+                determinant = multiply(T, determinant, a_ii);
                 // Set the digonals as one
                 for (0..self_echelon.p) |j| {
-                    if (self_echelon.data[i][j] != @as(T, 0)) {
-                        self_echelon.data[i][j] /= a_ii;
+                    if (!equal_to(T, self_echelon.data[i][j], as(f64, T, 0.0))) {
+                        self_echelon.data[i][j] = divide(T, self_echelon.data[i][j], a_ii);
                     }
                 }
                 for (0..b_echelon.p) |j| {
-                    if (b_echelon.data[i][j] != @as(T, 0)) {
+                    if (!equal_to(T, b_echelon.data[i][j], as(f64, T, 0.0))) {
                         b_echelon.data[i][j] /= a_ii;
                     }
                 }
@@ -355,10 +542,10 @@ fn Matrix(comptime T: type) type {
                 for (0..(i + 1)) |k| {
                     const a_i_1k = self_echelon.data[i + 1][k];
                     for (0..self_echelon.p) |j| {
-                        self_echelon.data[i + 1][j] -= a_i_1k * self_echelon.data[k][j];
+                        self_echelon.data[i + 1][j] = subtract(T, self_echelon.data[i + 1][j], multiply(T, a_i_1k, self_echelon.data[k][j]));
                     }
                     for (0..b_echelon.p) |j| {
-                        b_echelon.data[i + 1][j] -= a_i_1k * b_echelon.data[k][j];
+                        b_echelon.data[i + 1][j] = subtract(T, b_echelon.data[i + 1][j], multiply(T, a_i_1k, b_echelon.data[k][j]));
                     }
                 }
                 // std.debug.print("Iteration {any}\n", .{i});
@@ -381,10 +568,10 @@ fn Matrix(comptime T: type) type {
                     const k = self_echelon.n - (k_inverse + 1);
                     const a_i_1k = self_echelon.data[i - 1][k];
                     for (0..self_echelon.p) |j| {
-                        self_echelon.data[i - 1][j] -= a_i_1k * self_echelon.data[k][j];
+                        self_echelon.data[i - 1][j] = subtract(T, self_echelon.data[i - 1][j], multiply(T, a_i_1k, self_echelon.data[k][j]));
                     }
                     for (0..b_echelon.p) |j| {
-                        b_echelon.data[i - 1][j] -= a_i_1k * b_echelon.data[k][j];
+                        b_echelon.data[i - 1][j] = subtract(T, b_echelon.data[i - 1][j], multiply(T, a_i_1k, b_echelon.data[k][j]));
                     }
                 }
                 // std.debug.print("Iteration {any}\n", .{i});
@@ -396,22 +583,22 @@ fn Matrix(comptime T: type) type {
             // try b_echelon.print();
             if (self_echelon.n == self_echelon.p) {
                 // Update the determinants of the 2 ouput matrices just for completeness if they are square matrices
-                self_echelon.determinant = @as(T, 1);
+                self_echelon.determinant = as(f64, T, 1.00);
                 for (0..self_echelon.n) |i| {
                     if (i < self_echelon.p) {
-                        self_echelon.determinant.? *= self_echelon.data[i][i];
+                        self_echelon.determinant.? = multiply(T, self_echelon.determinant.?, self_echelon.data[i][i]);
                     }
                 }
             }
             if (b_echelon.n == b_echelon.p) {
-                b_echelon.determinant = @as(T, 1);
+                b_echelon.determinant = as(f64, T, 1.00);
                 for (0..b_echelon.n) |i| {
                     if (i < b_echelon.p) {
-                        b_echelon.determinant.? *= b_echelon.data[i][i];
+                        b_echelon.determinant.? = multiply(T, b_echelon.determinant.?, b_echelon.data[i][i]);
                     }
                 }
             }
-            return [2]Self{ self_echelon, b_echelon };
+            return .{ self_echelon, b_echelon };
         }
         /// LU decomposition (Ref: https://rosettacode.org/wiki/LU_decomposition)
         /// Additionally updates the determinant of self
@@ -422,52 +609,62 @@ fn Matrix(comptime T: type) type {
                 return MatrixError.NonSquareMatrix;
             }
             // Instantiate the permutation, L, and U matrices
-            var P = try Matrix(T).init(self.n, self.p, allocator);
-            var L = try Matrix(T).init(self.n, self.p, allocator);
-            var U = try Matrix(T).init(self.n, self.p, allocator);
+            var P: Self = undefined;
+            var L: Self = undefined;
+            var U: Self = undefined;
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                const F: type = @TypeOf(self.data[0][0]);
+                P = try Matrix(F).init_complex(self.n, self.p, allocator);
+                L = try Matrix(F).init_complex(self.n, self.p, allocator);
+                U = try Matrix(F).init_complex(self.n, self.p, allocator);
+            } else {
+                P = try Matrix(T).init(self.n, self.p, allocator);
+                L = try Matrix(T).init(self.n, self.p, allocator);
+                U = try Matrix(T).init(self.n, self.p, allocator);
+            }
             // Populate with zeros
             for (0..self.n) |i| {
                 for (0..self.p) |j| {
-                    P.data[i][j] = @as(T, 0);
-                    L.data[i][j] = @as(T, 0);
-                    U.data[i][j] = @as(T, 0);
+                    P.data[i][j] = as(f64, T, 0.0);
+                    L.data[i][j] = as(f64, T, 0.0);
+                    U.data[i][j] = as(f64, T, 0.0);
                 }
             }
             // Define the permutation matrix
             const row_indexes = try self.pivot(allocator);
             defer allocator.free(row_indexes);
             for (0..self.n) |i| {
-                P.data[row_indexes[i]][i] = @as(T, 1);
+                P.data[row_indexes[i]][i] = as(f64, T, 1.0);
             }
             // Decompose
             for (0..self.p) |j| {
-                L.data[j][j] = @as(T, 1);
+                L.data[j][j] = as(f64, T, 1.0);
                 for (row_indexes[0..(j + 1)], 0..) |i_a, i| {
-                    var s1 = @as(T, 0);
+                    var s1 = as(f64, T, 0.0);
                     for (0..i) |k| {
-                        s1 += U.data[k][j] * L.data[i][k];
+                        s1 += add(T, s1, multiply(T, U.data[k][j], L.data[i][k]));
                     }
-                    U.data[i][j] = self.data[i_a][j] - s1;
+                    U.data[i][j] = subtract(T, self.data[i_a][j], s1);
                 }
                 for (row_indexes[j..self.n], j..self.n) |i_a, i| {
-                    var s2 = @as(T, 0);
+                    var s2 = as(f64, T, 0.0);
                     for (0..j) |k| {
-                        s2 += U.data[k][j] * L.data[i][k];
+                        s2 += add(T, s2, multiply(T, U.data[k][j], L.data[i][k]));
                     }
-                    if (abs(T, U.data[j][j]) < @as(T, 0.000001)) {
+                    if (absolute(T, U.data[j][j]) < as(f64, T, 0.000001)) {
                         return MatrixError.SingularMatrix;
                     }
-                    L.data[i][j] = (self.data[i_a][j] - s2) / U.data[j][j];
+                    L.data[i][j] = divide(T, subtract(T, self.data[i_a][j], s2), U.data[j][j]);
                 }
             }
             // Append the determinants of each matrix including self, P, L, and U
-            P.determinant = @as(T, 1);
-            L.determinant = @as(T, 1);
-            self.determinant = @as(T, 1);
+            P.determinant = as(f64, T, 1.0);
+            L.determinant = as(f64, T, 1.0);
+            self.determinant = as(f64, T, 1.0);
             for (0..self.n) |i| {
-                self.determinant.? *= U.data[i][i];
+                self.determinant.? = multiply(T, self.determinant.?, U.data[i][i]);
             }
-            return [3]Self{ P, L, U };
+            return .{ P, L, U };
         }
         /// QR decomposition (Ref: https://rosettacode.org/wiki/QR_decomposition)
         /// Applicable for square and non-square matrices
@@ -486,7 +683,13 @@ fn Matrix(comptime T: type) type {
                 p -= 1;
             }
             // Initialise Q and R as identity matrices
-            var Q = try Matrix(T).init_identity(n, allocator);
+            var Q: Self = undefined;
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                const F: type = @TypeOf(self.data[0][0]);
+                Q = try Matrix(F).init_identity_complex(n, allocator);
+            } else {
+                Q = try Matrix(T).init_identity(n, allocator);
+            }
             var R = try self.clone(allocator);
             // Initialise the array of indexes for slicing and Housefolder reflection
             const indexes: []usize = try allocator.alloc(usize, n);
@@ -495,11 +698,20 @@ fn Matrix(comptime T: type) type {
                 indexes[i] = i;
             }
             // Iterate per column
+            var H: Self = undefined;
+            defer H.deinit(allocator);
             for (0..p) |j| {
                 // Define the Householder reflection matrix for the current iteration
-                var H = try Matrix(T).init_identity(n, allocator);
+                if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                    const F: type = @TypeOf(self.data[0][0]);
+                    H = try Matrix(F).init_identity_complex(n, allocator);
+                } else {
+                    H = try Matrix(T).init_identity(n, allocator);
+                }
                 const a = try R.slice(indexes[j..], indexes[j..(j + 1)], allocator);
                 const h = try a.reflect_householder(allocator);
+                defer a.deinit(allocator);
+                defer h.deinit(allocator);
                 for (j..n, 0..) |H_i, h_i| {
                     for (j..n, 0..) |H_j, h_j| {
                         H.data[H_i][H_j] = h.data[h_i][h_j];
@@ -521,7 +733,7 @@ fn Matrix(comptime T: type) type {
                     }
                 }
             }
-            return [2]Self{ Q, R };
+            return .{ Q, R };
         }
         /// Cholesky decomposition (Ref: https://rosettacode.org/wiki/Cholesky_decomposition)
         /// Applicable to square symmetric matrices
@@ -540,25 +752,31 @@ fn Matrix(comptime T: type) type {
                 }
             }
             const n = self.p;
-            var L = try Matrix(T).init_fill(n, n, @as(T, 0), allocator);
-            var determinant = @as(T, 1);
+            var L: Self = undefined;
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                const F: type = @TypeOf(self.data[0][0]);
+                L = try Matrix(F).init_fill_complex(n, n, as(f64, T, 0.0), allocator);
+            } else {
+                L = try Matrix(T).init_fill(n, n, as(f64, T, 0.0), allocator);
+            }
+            var determinant = as(f64, T, 1.0);
             for (0..n) |i| {
                 for (0..(i + 1)) |j| {
-                    var sum = @as(T, 0);
+                    var sum = as(f64, T, 0.0);
                     for (0..j) |k| {
-                        sum += L.data[i][k] * L.data[j][k];
+                        sum = add(T, sum, multiply(T, L.data[i][k], L.data[j][k]));
                     }
                     if (i == j) {
-                        const L_ij_squared = self.data[i][i] - sum;
-                        if (L_ij_squared < @as(T, 0)) {
+                        const L_ij_squared = add(T, self.data[i][i], sum);
+                        if (L_ij_squared < as(f64, T, 0.0)) {
                             return MatrixError.NotPositiveSemiDefinite;
                         }
-                        L.data[i][j] = @sqrt(L_ij_squared);
+                        L.data[i][j] = square_root(T, L_ij_squared);
                     } else {
-                        if (L.data[j][j] == @as(T, 0)) {
+                        if (L.data[j][j] == as(f64, T, 0.0)) {
                             return MatrixError.NotPositiveSemiDefinite;
                         }
-                        L.data[i][j] = (@as(T, 1) / L.data[j][j]) * (self.data[i][j] - sum);
+                        L.data[i][j] = multiply(T, divide(T, as(f64, T, 1.0), L.data[j][j]), add(T, self.data[i][j], sum));
                     }
                     // std.debug.print("@@@@@@@@@@@@@@@@@@@@@\n", .{});
                     // std.debug.print("i={any}; j={any}:\n", .{ i, j });
@@ -567,7 +785,7 @@ fn Matrix(comptime T: type) type {
                     // std.debug.print("L:\n", .{});
                     // try L.print();
                 }
-                determinant *= (L.data[i][i] * L.data[i][i]); // deteterminant is equal to the product of the squares of the diagonal of L
+                determinant = multiply(T, determinant, multiply(T, L.data[i][i], L.data[i][i])); // deteterminant is equal to the product of the squares of the diagonal of L
             }
             // Update the determinant in self and L
             self.determinant = determinant;
@@ -582,99 +800,108 @@ fn Matrix(comptime T: type) type {
         /// TODO: Fix singularities in inverting the eigen vectors.
         /// TODO: try to properly implement Wilkinson's shift with matrix deflation and possibly reordering/pivoting?
         /// TODO: Improve the speed and convergence logic.
-        pub fn eigen_QR(self: *Self, allocator: Allocator) ![2]Self {
-            if (self.n != self.p) {
-                return MatrixError.NonSquareMatrix;
-            }
-            const max_iter: usize = 100;
-            var A = try self.clone(allocator);
-            defer A.deinit(allocator);
-            var eigenvectors = try Matrix(T).init_identity(self.n, allocator);
-            var shifter: T = @as(T, 0);
-            var epsilon: T = @as(T, 1_000); // An arbitrarily large epsilon to begin with (this the the mean absolute difference in eigenvalues between 2 consecutive iterations)
-            for (0..max_iter) |iter| {
-                // Define the shifter (Wilkinson's shift)
-                if (A.n >= 2) {
-                    const a: T = A.data[self.n - 2][self.n - 2];
-                    const b: T = A.data[self.n - 2][self.n - 1];
-                    const c: T = A.data[self.n - 1][self.n - 2];
-                    const d: T = A.data[self.n - 1][self.n - 1];
-                    const B: T = a + d;
-                    const C: T = (a * d) + (b * c);
-                    var REAL_1: T = -B / @as(T, 2);
-                    var REAL_2: T = -B / @as(T, 2);
-                    var IMAGINARY_1: T = @as(T, 0);
-                    var IMAGINARY_2: T = @as(T, 0);
-                    const b2_4ac: T = std.math.pow(T, B, 2) - (@as(T, 4) * @as(T, 1) * C);
-                    if (b2_4ac < 0.0) {
-                        IMAGINARY_1 += @sqrt(-b2_4ac) / @as(T, 2);
-                        IMAGINARY_2 += @sqrt(-b2_4ac) / @as(T, 2);
-                    } else {
-                        REAL_1 += @sqrt(b2_4ac) / @as(T, 2);
-                        REAL_2 += @sqrt(b2_4ac) / @as(T, 2);
-                    }
-                    // Which root is closest to d?
-                    // const diff_1: T = abs(T, (REAL_1 + IMAGINARY_1) - d);
-                    // const diff_2: T = abs(T, (REAL_2 + IMAGINARY_2) - d);
+        // pub fn eigendecomposition_QR(self: *Matrix(T), comptime F: type, allocator: Allocator) ![2]Matrix(Complex(F)) {
+        //     // If self is a complex matrix then F is the type of the floats inside the complex numbers
+        //     // otherwise T == F (if the matrix is not complex)
+        //     if (self.n != self.p) {
+        //         return MatrixError.NonSquareMatrix;
+        //     }
+        //     var A: Matrix(Complex(F)) = undefined;
+        //     if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+        //         A = try self.clone(allocator);
+        //     } else {
+        //         A = try self.clone_into_complex(allocator);
+        //     }
+        //     defer A.deinit(allocator);
+        //     const max_iter: usize = 100;
+        //     var eigenvectors = try Matrix(F).init_identity(self.n, allocator);
+        //     var shifter: F = @as(F, 0);
+        //     var epsilon: F = @as(F, 1_000); // An arbitrarily large epsilon to begin with (this the the mean absolute difference in eigenvalues between 2 consecutive iterations)
+        //     for (0..max_iter) |iter| {
+        //         // Define the shifter (Wilkinson's shift)
+        //         if (A.n >= 2) {
+        //             const a: F = A.data[self.n - 2][self.n - 2];
+        //             const b: F = A.data[self.n - 2][self.n - 1];
+        //             const c: F = A.data[self.n - 1][self.n - 2];
+        //             const d: F = A.data[self.n - 1][self.n - 1];
+        //             const B: F = add(F, a, d);
+        //             const C: F = add(F, multiply(F, a, d), multiply(F, b, c));
+        //             // var REAL_1: F = -B / @as(F, 2);
+        //             // var REAL_2: F = -B / @as(F, 2);
+        //             // var IMAGINARY_1: F = @as(F, 0);
+        //             // var IMAGINARY_2: F = @as(F, 0);
+        //             const b2_4ac: F = std.math.pow(T, B, 2) - (@as(T, 4) * as(f64, T, 1.0) * C);
+        //             if (b2_4ac < 0.0) {
+        //                 IMAGINARY_1 += @sqrt(-b2_4ac) / @as(T, 2);
+        //                 IMAGINARY_2 += @sqrt(-b2_4ac) / @as(T, 2);
+        //             } else {
+        //                 REAL_1 += @sqrt(b2_4ac) / @as(T, 2);
+        //                 REAL_2 += @sqrt(b2_4ac) / @as(T, 2);
+        //             }
+        //             // Which root is closest to d?
+        //             // const diff_1: T = absolute(T, (REAL_1 + IMAGINARY_1) - d);
+        //             // const diff_2: T = absolute(T, (REAL_2 + IMAGINARY_2) - d);
 
-                    const complex_d = std.math.Complex(T).init(d, 0.0);
-                    const complex_1 = std.math.Complex(T).init(REAL_1, IMAGINARY_1);
-                    const complex_2 = std.math.Complex(T).init(REAL_2, IMAGINARY_2);
+        //             const complex_d = Complex(T).init(d, 0.0);
+        //             const complex_1 = Complex(T).init(REAL_1, IMAGINARY_1);
+        //             const complex_2 = Complex(T).init(REAL_2, IMAGINARY_2);
 
-                    const diff_1 = abs(std.math.complex.Complex(T), complex_1.sub(complex_d));
-                    const diff_2 = abs(std.math.complex.Complex(T), complex_2.sub(complex_d));
+        //             const diff_1 = abs(Complex(T), complex_1.sub(complex_d));
+        //             const diff_2 = abs(Complex(T), complex_2.sub(complex_d));
 
-                    if (less_than(std.math.complex.Complex(T), diff_1, diff_2)) {
-                        // TODO: handle complex numbers properly
-                        // For now, we are only keeping the real components
-                        shifter = REAL_1;
-                    } else {
-                        shifter = REAL_2;
-                    }
-                }
-                // Subtract the shifter from A prior to QR decomposition
-                for (0..self.n) |i| {
-                    A.data[i][i] -= shifter;
-                }
-                // QR decomposition
-                const QR = try A.qr(allocator);
-                defer QR[0].deinit(allocator);
-                defer QR[1].deinit(allocator);
-                const Q0_x_Q1 = try eigenvectors.mult(QR[0], allocator);
-                defer Q0_x_Q1.deinit(allocator);
-                for (0..self.n) |i| {
-                    for (0..self.p) |j| {
-                        eigenvectors.data[i][j] = Q0_x_Q1.data[i][j];
-                    }
-                }
-                // Reconsititute A
-                A = try QR[1].mult(QR[0], allocator);
-                // Add back the shifter into A
-                for (0..self.n) |i| {
-                    A.data[i][i] += shifter;
-                }
-                // TODO: check for convergence per eigenvalue followed by matrix deflation
-                // Check for convergence
-                epsilon = @as(T, 0);
-                for (0..self.n) |i| {
-                    epsilon += abs(T, eigenvectors.data[i][0] - A.data[i][i]);
-                }
-                epsilon /= @floatFromInt(self.n);
-                if ((iter >= self.n) and (epsilon < 0.00001)) {
-                    break;
-                }
+        //             if (less_than(Complex(T), diff_1, diff_2)) {
+        //                 // TODO: handle complex numbers properly
+        //                 // For now, we are only keeping the real components
+        //                 shifter = REAL_1;
+        //             } else {
+        //                 shifter = REAL_2;
+        //             }
+        //         }
+        //         // Subtract the shifter from A prior to QR decomposition
+        //         for (0..self.n) |i| {
+        //             A.data[i][i] -= shifter;
+        //         }
+        //         // QR decomposition
+        //         const QR = try A.qr(allocator);
+        //         defer QR[0].deinit(allocator);
+        //         defer QR[1].deinit(allocator);
+        //         const Q0_x_Q1 = try eigenvectors.mult(QR[0], allocator);
+        //         defer Q0_x_Q1.deinit(allocator);
+        //         for (0..self.n) |i| {
+        //             for (0..self.p) |j| {
+        //                 eigenvectors.data[i][j] = Q0_x_Q1.data[i][j];
+        //             }
+        //         }
+        //         // Reconsititute A
+        //         A = try QR[1].mult(QR[0], allocator);
+        //         // Add back the shifter into A
+        //         for (0..self.n) |i| {
+        //             A.data[i][i] += shifter;
+        //         }
+        //         // TODO: check for convergence per eigenvalue followed by self deflation
+        //         // Check for convergence
+        //         epsilon = as(f64, T, 0.0);
+        //         for (0..self.n) |i| {
+        //             epsilon += absolute(T, eigenvectors.data[i][0] - A.data[i][i]);
+        //         }
+        //         epsilon /= @floatFromInt(self.n);
+        //         if ((iter >= self.n) and (epsilon < 0.00001)) {
+        //             break;
+        //         }
 
-                std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
-                std.debug.print("iter={any} | epsilon={any}\n", .{ iter, epsilon });
-                try A.print();
-            }
-            var eigenvalues = try Matrix(T).init(self.n, 1, allocator);
-            for (0..self.n) |i| {
-                eigenvalues.data[i][0] = A.data[i][i];
-            }
-            return [2]Self{ eigenvalues, eigenvectors };
-        }
-
+        //         std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+        //         std.debug.print("iter={any} | epsilon={any}\n", .{ iter, epsilon });
+        //         try A.print();
+        //     }
+        //     var eigenvalues = try Matrix(T).init(self.n, 1, allocator);
+        //     for (0..self.n) |i| {
+        //         eigenvalues.data[i][0] = A.data[i][i];
+        //     }
+        //     const value = Complex(T).init(std.math.pi, 0.0);
+        //     const eval: Matrix(Complex(T)) = try Matrix(Complex(T)).init_fill(100, 100, value, allocator);
+        //     const evec: Matrix(Complex(T)) = try Matrix(Complex(T)).init_fill(5, 5, value, allocator);
+        //     return .{ eval, evec };
+        // }
         /// TODO: Implement SVD
         /// Singular valude decomposition (Ref: https://builtin.com/articles/svd-algorithm)
         /// Generalisation of eigendecomposition on non-square matrices
@@ -685,12 +912,12 @@ fn Matrix(comptime T: type) type {
             defer eigenvectors.deinit(allocator);
             var singular_vectors = try self.mult(eigenvectors, allocator);
             for (0..singular_values.n) |i| {
-                singular_values.data[i][0] = @sqrt(singular_values.data[i][0]);
+                singular_values.data[i][0] = square_root(T, singular_values.data[i][0]);
                 for (0..eigenvectors.p) |j| {
-                    singular_vectors.data[i][j] /= singular_values.data[i][0];
+                    singular_vectors.data[i][j] = divide(T, singular_vectors.data[i][j], singular_values.data[i][0]);
                 }
             }
-            return [2]Self{ singular_vectors, singular_vectors };
+            return .{ singular_vectors, singular_vectors };
         }
     };
 }
@@ -777,6 +1004,66 @@ test "Initialisations, cloning and slicing" {
             idx_j += 1;
         }
         idx_i += 1;
+    }
+}
+
+test "Complex matrices" {
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+    std.debug.print("Complex matrices", .{});
+    std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+
+    // Initialisation
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    const n: usize = 4;
+    const p: usize = 4;
+    var a = try Matrix(f64).init(n, p, allocator);
+    defer a.deinit(allocator);
+    try expect(a.n == n);
+    try expect(a.p == p);
+    std.debug.print("a.data[0][0]={?}\n", .{a.data[0][0]});
+    std.debug.print("a={any}\n", .{a});
+
+    // Clone real matrix into a complex matrix with 0.0 imaginary component
+    const a_complex = try a.clone_into_complex(allocator);
+    defer a_complex.deinit(allocator);
+    for (0..n) |i| {
+        for (0..n) |j| {
+            try expect(a_complex.data[i][j].re == a.data[i][j]);
+            try expect(a_complex.data[i][j].im == 0.0);
+        }
+    }
+
+    // Initialise a complex matrix
+    const b_complex = try Matrix(f64).init_complex(n, p, allocator);
+    defer b_complex.deinit(allocator);
+    const C: type = @TypeOf(b_complex.data[0][0]);
+    try expect(C == Complex(f64));
+
+    // Identity matrix
+    const identity_complex = try Matrix(f64).init_identity_complex(n, allocator);
+    defer identity_complex.deinit(allocator);
+    for (0..n) |i| {
+        for (0..n) |j| {
+            if (i == j) {
+                try expect(identity_complex.data[i][j].re == 1.00);
+                try expect(identity_complex.data[i][j].im == 0.00);
+            } else {
+                try expect(identity_complex.data[i][j].re == 0.00);
+                try expect(identity_complex.data[i][j].im == 0.00);
+            }
+        }
+    }
+
+    // Pre-filled matrix with a constant value
+    const value: f64 = 3.1416;
+    const matrix_with_constant_complex = try Matrix(f64).init_fill_complex(n, p, value, allocator);
+    defer matrix_with_constant_complex.deinit(allocator);
+    for (0..n) |i| {
+        for (0..n) |j| {
+            try expect(matrix_with_constant_complex.data[i][j].re == value);
+            try expect(matrix_with_constant_complex.data[i][j].im == 0.0);
+        }
     }
 }
 
@@ -892,7 +1179,7 @@ test "Pivot, norms, reflections, and rotations" {
     // Norms
     const norm_f = try a.norm_forbenius();
     std.debug.print("norm_f: {any}\n", .{norm_f});
-    try expect(abs(f64, norm_f - 10.29563) < 0.00001);
+    try expect(absolute(f64, norm_f - 10.29563) < 0.00001);
 
     //Reflection
     var b = try Matrix(f64).init(p, 1, allocator);
@@ -910,7 +1197,7 @@ test "Pivot, norms, reflections, and rotations" {
     for (0..n) |i| {
         for (0..n) |j| {
             const k = (i * n) + j;
-            try expect(abs(f64, H.data[i][j] - expected_housholder_reflections[k]) < 0.00001);
+            try expect(absolute(f64, H.data[i][j] - expected_housholder_reflections[k]) < 0.00001);
         }
     }
 }
@@ -1111,12 +1398,12 @@ test "QR decomposition" {
     const expected_R = [3 * 3]f64{ -17.20465, -18.25088, 15.46094, 0.00000, -175.31944, 70.01976, 0.00000, 0.00000, 35.04559 };
     for (0..4) |i| {
         for (0..4) |j| {
-            try expect(abs(f64, Q_A.data[i][j] - expected_Q[(i * 4) + j]) < 0.00001);
+            try expect(absolute(f64, Q_A.data[i][j] - expected_Q[(i * 4) + j]) < 0.00001);
         }
     }
     for (0..3) |i| {
         for (0..3) |j| {
-            try expect(abs(f64, R_A.data[i][j] - expected_R[(i * 3) + j]) < 0.00001);
+            try expect(absolute(f64, R_A.data[i][j] - expected_R[(i * 3) + j]) < 0.00001);
         }
     }
 }
@@ -1169,7 +1456,7 @@ test "Eigen decomposition" {
     std.debug.print("Eigen decomposition", .{});
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
     // Preliminaries
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){}; // defer is autimatically executed after we return, i.e. when we go beyon the scope in which gpa was created
     const allocator = gpa.allocator();
     const n: usize = 5;
     const p: usize = 5;
@@ -1191,25 +1478,26 @@ test "Eigen decomposition" {
     std.debug.print("b={any}\n", .{b});
     std.debug.print("identity={any}\n", .{identity});
 
-    // Eigenvalues and eigenvectors
-    var timer = try std.time.Timer.start();
-    const eigen_out = try a.eigen_QR(allocator);
-    const time_elapsed = timer.read();
-    std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
-    std.debug.print("eigenvalues:\n", .{});
-    try eigen_out[0].print();
-    std.debug.print("eigenvectors:\n", .{});
-    try eigen_out[1].print();
+    // // Eigenvalues and eigenvectors
+    // var timer = try std.time.Timer.start();
+    // const eigen_out = try a.eigendecomposition_QR(allocator);
+    // const time_elapsed = timer.read();
+    // std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
+    // // std.debug.print("Eigenvalues: {any}\n", .{eigen_out[0].data});
+    // std.debug.print("eigenvalues:\n", .{});
+    // try eigen_out[0].print();
+    // std.debug.print("eigenvectors:\n", .{});
+    // try eigen_out[1].print();
 
-    var P = try eigen_out[1].clone(allocator);
-    std.debug.print("P:\n", .{});
-    try P.print();
-    var D = try Matrix(f64).init_identity(5, allocator);
-    for (0..5) |i| {
-        D.data[i][i] = eigen_out[0].data[i][0];
-    }
-    std.debug.print("D:\n", .{});
-    try D.print();
+    // var P = try eigen_out[1].clone(allocator);
+    // std.debug.print("P:\n", .{});
+    // try P.print();
+    // var D = try Matrix(f64).init_identity(5, allocator);
+    // for (0..5) |i| {
+    //     D.data[i][i] = eigen_out[0].data[i][0];
+    // }
+    // std.debug.print("D:\n", .{});
+    // try D.print();
 
     // TODO: Implement math operations for primitive math type and complex number class
     // const d: f64 = 0.0;
