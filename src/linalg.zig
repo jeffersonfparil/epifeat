@@ -814,24 +814,27 @@ fn Matrix(comptime T: type) type {
                 A = try self.clone_into_complex(allocator);
             }
             defer A.deinit(allocator);
-            const max_iter: usize = 1_000;
+            const max_iter: usize = 10_000;
             var eigenvalues = try Matrix(C).init(self.n, 1, allocator);
             var eigenvectors = try Matrix(F).init_identity_complex(self.n, allocator);
             var E = try eigenvectors.clone(allocator);
+            defer E.deinit(allocator);
             var shifter: C = undefined;
-            var epsilon: C = undefined;
-            var eigenval_previous: C = A.data[0][0];
             var n_eigens_finished: usize = 0;
-            for (0..max_iter) |iter| {
+            for (0..max_iter) |_| {
                 // Define the shifter (Wilkinson's shift)
                 if (A.n >= 2) {
                     const A_a: C = A.data[A.n - 2][A.n - 2];
                     const A_b: C = A.data[A.n - 2][A.n - 1];
                     const A_c: C = A.data[A.n - 1][A.n - 2];
                     const A_d: C = A.data[A.n - 1][A.n - 1];
+                    // const A_a: C = A.data[0][0];
+                    // const A_b: C = A.data[0][1];
+                    // const A_c: C = A.data[1][0];
+                    // const A_d: C = A.data[1][1];
                     const a: C = as(f64, C, 1.00);
                     const b: C = add(C, A_a, A_d);
-                    const c: C = add(C, multiply(C, A_a, A_d), multiply(C, A_b, A_c));
+                    const c: C = subtract(C, multiply(C, A_a, A_d), multiply(C, A_b, A_c));
                     const b2_4ac: C = subtract(C, multiply(C, b, b), multiply(C, multiply(C, as(f64, C, 4.00), a), c));
                     const x_1: C = divide(C, add(C, negative(C, b), square_root(C, b2_4ac)), multiply(C, as(f64, C, 2.00), a));
                     const x_2: C = divide(C, subtract(C, negative(C, b), square_root(C, b2_4ac)), multiply(C, as(f64, C, 2.00), a));
@@ -862,14 +865,21 @@ fn Matrix(comptime T: type) type {
                     A.data[i][i] = add(C, A.data[i][i], shifter);
                 }
                 // Go to the next eigenvalue if all row below n_eigens_finished(th) column are all zero
-                epsilon = as(f64, C, 0.0);
+                var n_threshold_passed: usize = 0;
                 for (1..A.n) |i| {
-                    epsilon = add(C, epsilon, absolute(C, A.data[i][0]));
+                    var max_Aii_Ajj = absolute(C, A.data[0][0]);
+                    if (greater_than(C, absolute(C, A.data[i][i]), max_Aii_Ajj)) {
+                        max_Aii_Ajj = absolute(C, A.data[i][i]);
+                    }
+                    const Aij_over_max_Aii_Ajj = divide(C, absolute(C, A.data[i][0]), max_Aii_Ajj);
+                    // std.debug.print("Aij_over_max_Aii_Ajj={any}\n", .{Aij_over_max_Aii_Ajj});
+                    if (less_than(C, Aij_over_max_Aii_Ajj, as(f64, C, 0.001))) {
+                        n_threshold_passed += 1;
+                        // A.data[i][0] = as(f64, C, 0.0);
+                    }
                 }
-                std.debug.print("n_eigens_finished={any}\n", .{n_eigens_finished});
-                std.debug.print("epsilon={any}\n", .{epsilon});
-                if ((less_than(C, epsilon, as(f64, C, 0.00001))) or less_than(C, absolute(C, subtract(C, eigenval_previous, A.data[0][0])), as(f64, C, 0.00001))) {
-                    eigenval_previous = A.data[0][0];
+                // std.debug.print("A.n={any}; n_threshold_passed={any}\n", .{ A.n, n_threshold_passed });
+                if (n_threshold_passed == (A.n - 1)) {
                     eigenvalues.data[n_eigens_finished][0] = A.data[0][0];
                     n_eigens_finished += 1;
                     var row_indexes: []usize = try allocator.alloc(usize, A.n - 1);
@@ -878,44 +888,46 @@ fn Matrix(comptime T: type) type {
                         row_indexes[i - 1] = i;
                         col_indexes[i - 1] = i;
                     }
-                    std.debug.print("row_indexes={any}\n", .{row_indexes});
+                    // std.debug.print("row_indexes={any}\n", .{row_indexes});
                     A = try A.slice(row_indexes, col_indexes, allocator);
                     E = try E.slice(row_indexes, col_indexes, allocator);
                     // try A.print();
                 }
-                if (n_eigens_finished == self.n) {
+                // // Update the eigenvectors
+                // for (0..A.n) |i| {
+                //     for (0..A.p) |j| {
+                //         E.data[i][j] = Q0_x_Q1.data[i][j];
+                //         eigenvectors.data[i + n_eigens_finished][j + n_eigens_finished] = Q0_x_Q1.data[i][j];
+                //     }
+                // }
+                // std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
+                // std.debug.print("iter={any}\n", .{iter});
+                // try A.print();
+                if (A.n < 2) {
                     break;
                 }
-                // Update the eigenvectors
-                for (0..A.n) |i| {
-                    for (0..A.p) |j| {
-                        E.data[i][j] = Q0_x_Q1.data[i][j];
-                        eigenvectors.data[i + n_eigens_finished][j + n_eigens_finished] = Q0_x_Q1.data[i][j];
-                    }
-                }
-                std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
-                std.debug.print("iter={any} | epsilon={any}\n", .{ iter, epsilon });
-                try A.print();
             }
+            // Update with the final eigenvalue
+            eigenvalues.data[n_eigens_finished][0] = A.data[A.n - 1][A.n - 1];
             return .{ eigenvalues, eigenvectors };
         }
-        /// TODO: Implement SVD
-        /// Singular valude decomposition (Ref: https://builtin.com/articles/svd-algorithm)
-        /// Generalisation of eigendecomposition on non-square matrices
-        pub fn svd(self: *Self, allocator: Allocator) ![2]Self {
-            const eigen = try self.eigen_QR(allocator);
-            var singular_values = eigen[0]; // singular values are the square-roots of the eigenvalues
-            const eigenvectors = eigen[1];
-            defer eigenvectors.deinit(allocator);
-            var singular_vectors = try self.mult(eigenvectors, allocator);
-            for (0..singular_values.n) |i| {
-                singular_values.data[i][0] = square_root(T, singular_values.data[i][0]);
-                for (0..eigenvectors.p) |j| {
-                    singular_vectors.data[i][j] = divide(T, singular_vectors.data[i][j], singular_values.data[i][0]);
-                }
-            }
-            return .{ singular_vectors, singular_vectors };
-        }
+        // /// TODO: Implement SVD
+        // /// Singular valude decomposition (Ref: https://builtin.com/articles/svd-algorithm)
+        // /// Generalisation of eigendecomposition on non-square matrices
+        // pub fn svd(self: *Self, allocator: Allocator) ![2]Self {
+        //     const eigen = try self.eigen_QR(allocator);
+        //     var singular_values = eigen[0]; // singular values are the square-roots of the eigenvalues
+        //     const eigenvectors = eigen[1];
+        //     defer eigenvectors.deinit(allocator);
+        //     var singular_vectors = try self.mult(eigenvectors, allocator);
+        //     for (0..singular_values.n) |i| {
+        //         singular_values.data[i][0] = square_root(T, singular_values.data[i][0]);
+        //         for (0..eigenvectors.p) |j| {
+        //             singular_vectors.data[i][j] = divide(T, singular_vectors.data[i][j], singular_values.data[i][0]);
+        //         }
+        //     }
+        //     return .{ singular_vectors, singular_vectors };
+        // }
     };
 }
 
@@ -1461,14 +1473,16 @@ test "Eigen decomposition" {
     defer a.deinit(allocator);
     var b = try Matrix(f64).init(n, p, allocator);
     defer b.deinit(allocator);
-    const contents = [25]f64{ 12, 22, 35, 64, 2, 16, 72, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970 };
+    // const contents = [25]f64{ 12, 22, 35, 64, 2, 16, 72, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970 };
+    const contents = [25]f64{ 912, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 943, 34, 5, 156, 12, 56, 997, 312, 546, 7, 28, 586, 970 };
+    // const contents = [25]f64{ 72, 91, 49, 7, 29, 81, 42, 50, 93, 2, 13, 4, 82, 40, 100, 97, 85, 46, 3, 75, 55, 41, 59, 74, 35 };
     for (0..n) |i| {
         for (0..p) |j| {
             a.data[i][j] = contents[(i * p) + j];
             b.data[j][i] = contents[(i * p) + j];
         }
     }
-    const identity = try Matrix(f64).init_identity(n, allocator);
+    const identity = try Matrix(f64).init_identity_complex(n, allocator);
     defer identity.deinit(allocator);
     std.debug.print("a:\n", .{});
     try a.print();
@@ -1486,31 +1500,34 @@ test "Eigen decomposition" {
     std.debug.print("eigenvectors:\n", .{});
     try eigen_out[1].print();
 
-    // var P = try eigen_out[1].clone(allocator);
-    // std.debug.print("P:\n", .{});
-    // try P.print();
-    // var D = try Matrix(f64).init_identity(5, allocator);
-    // for (0..5) |i| {
-    //     D.data[i][i] = eigen_out[0].data[i][0];
-    // }
-    // std.debug.print("D:\n", .{});
-    // try D.print();
+    var P = try eigen_out[1].clone(allocator);
+    std.debug.print("P:\n", .{});
+    try P.print();
+    var D = try Matrix(f64).init_identity_complex(5, allocator);
+    for (0..5) |i| {
+        D.data[i][i] = eigen_out[0].data[i][0];
+    }
+    std.debug.print("D:\n", .{});
+    try D.print();
 
-    // TODO: Implement math operations for primitive math type and complex number class
-    // const d: f64 = 0.0;
-    // const e: f64 = 1.0;
-    // const f: f64 = d.sum(e);
-    // std.debug.print("f={any}\n", .{f});
-    // TODO: implement complex number operations
-    // TODO: implement per eigenvalue convergence test
-    // TODO: implement A matrix deflation after each eigenvalue convergence
-    // const P_inverse = try P.gaussian_elimination(identity, allocator);
-    // std.debug.print("P_inverse[1]:\n", .{});
-    // try P_inverse[1].print();
-    // const PD = try P.mult(D, allocator);
-    // std.debug.print("PD:\n", .{});
-    // try PD.print();
-    // const a_reconstituted = try PD.mult(P_inverse[1], allocator);
-    // std.debug.print("a_reconstituted:\n", .{});
-    // try a_reconstituted.print();
+    const P_inverse = try P.gaussian_elimination(identity, allocator);
+    std.debug.print("P_inverse[1]:\n", .{});
+    try P_inverse[1].print();
+    const PD = try P.mult(D, allocator);
+    std.debug.print("PD:\n", .{});
+    try PD.print();
+    const a_reconstituted = try PD.mult(P_inverse[1], allocator);
+    std.debug.print("a_reconstituted:\n", .{});
+    try a_reconstituted.print();
+
+    // Checking in R
+    // x = c(912, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 943, 34, 5, 156, 12, 56, 997, 312, 546, 7, 28, 586, 970)
+    // X = matrix(x, nrow=5)
+    // det(X)
+    // E = eigen(X)
+    // P = E$vectors
+    // D = diag(E$values)
+    // Y = P %*% D %*% solve(P)
+    // sum(abs(X - Y)) < 0.000001
+
 }
