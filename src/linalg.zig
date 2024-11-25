@@ -102,6 +102,8 @@ fn absolute(comptime T: type, a: T) T {
     if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
         const F: type = @TypeOf(a.re);
         out = Complex(F).init(@sqrt((a.re * a.re) + (a.im * a.im)), 0.0);
+        // const hypotenuse = std.math.complex.abs(a);
+        // return Complex(F).init(hypotenuse, 0.0);
     } else {
         out = @abs(a);
     }
@@ -814,11 +816,9 @@ fn Matrix(comptime T: type) type {
                 A = try self.clone_into_complex(allocator);
             }
             defer A.deinit(allocator);
-            const max_iter: usize = 10_000;
+            const max_iter: usize = 1_000;
             var eigenvalues = try Matrix(C).init(self.n, 1, allocator);
-            var eigenvectors = try Matrix(F).init_identity_complex(self.n, allocator);
-            var E = try eigenvectors.clone(allocator);
-            defer E.deinit(allocator);
+            var eigenvectors = try Matrix(F).init_complex(self.n, self.p, allocator);
             var shifter: C = undefined;
             var n_eigens_finished: usize = 0;
             for (0..max_iter) |_| {
@@ -856,8 +856,6 @@ fn Matrix(comptime T: type) type {
                 const QR = try A.qr(allocator);
                 defer QR[0].deinit(allocator);
                 defer QR[1].deinit(allocator);
-                const Q0_x_Q1 = try E.mult(QR[0], allocator);
-                defer Q0_x_Q1.deinit(allocator);
                 // Reconsititute A
                 A = try QR[1].mult(QR[0], allocator);
                 // Add back the shifter into A
@@ -890,25 +888,56 @@ fn Matrix(comptime T: type) type {
                     }
                     // std.debug.print("row_indexes={any}\n", .{row_indexes});
                     A = try A.slice(row_indexes, col_indexes, allocator);
-                    E = try E.slice(row_indexes, col_indexes, allocator);
                     // try A.print();
                 }
-                // // Update the eigenvectors
-                // for (0..A.n) |i| {
-                //     for (0..A.p) |j| {
-                //         E.data[i][j] = Q0_x_Q1.data[i][j];
-                //         eigenvectors.data[i + n_eigens_finished][j + n_eigens_finished] = Q0_x_Q1.data[i][j];
-                //     }
-                // }
-                // std.debug.print("@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
-                // std.debug.print("iter={any}\n", .{iter});
-                // try A.print();
+
                 if (A.n < 2) {
                     break;
                 }
             }
             // Update with the final eigenvalue
             eigenvalues.data[n_eigens_finished][0] = A.data[A.n - 1][A.n - 1];
+            // Extract eigenvectors
+            const identity = try Matrix(F).init_fill_complex(self.n, 1, 1.00, allocator);
+            // const identity = try Matrix(F).init_identity_complex(A.n, allocator);
+            defer identity.deinit(allocator);
+            for (0..eigenvalues.n) |j| {
+                if (T == C) {
+                    A = try self.clone(allocator);
+                } else {
+                    A = try self.clone_into_complex(allocator);
+                }
+                const lambda: C = eigenvalues.data[j][0];
+                for (0..A.n) |ix| {
+                    A.data[ix][ix] = subtract(C, A.data[ix][ix], lambda);
+                    // A.data[ix][ix] = add(C, subtract(C, A.data[ix][ix], lambda), as(f64, C, 1.00));
+                }
+                const V = try A.gaussian_elimination(identity, allocator);
+                defer V[0].deinit(allocator);
+                defer V[1].deinit(allocator);
+                var norm: C = multiply(C, V[1].data[0][0], V[1].data[0][0]);
+                for (1..V[1].n) |i| {
+                    norm = add(C, norm, multiply(C, V[1].data[i][0], V[1].data[i][0]));
+                }
+                norm = square_root(C, norm);
+                for (0..eigenvectors.n) |i| {
+                    // eigenvectors.data[i][j] = V[1].data[i][0];
+                    eigenvectors.data[i][j] = divide(C, V[1].data[i][0], norm);
+                    // eigenvectors.data[i][j] = subtract(C, V[1].data[i][0], as(f64, C, 1.00));
+                }
+                const TEST = try A.mult(V[1], allocator);
+                defer TEST.deinit(allocator);
+                std.debug.print("i:{any}\n", .{j});
+                try A.print();
+                try V[0].print();
+                try V[1].print();
+                try eigenvectors.print();
+                try TEST.print();
+            }
+            std.debug.print("Eigenvalues:\n", .{});
+            try eigenvalues.print();
+            std.debug.print("Eigenvectors:\n", .{});
+            try eigenvectors.print();
             return .{ eigenvalues, eigenvectors };
         }
         // /// TODO: Implement SVD
@@ -1473,9 +1502,8 @@ test "Eigen decomposition" {
     defer a.deinit(allocator);
     var b = try Matrix(f64).init(n, p, allocator);
     defer b.deinit(allocator);
-    // const contents = [25]f64{ 12, 22, 35, 64, 2, 16, 72, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970 };
     const contents = [25]f64{ 912, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 943, 34, 5, 156, 12, 56, 997, 312, 546, 7, 28, 586, 970 };
-    // const contents = [25]f64{ 72, 91, 49, 7, 29, 81, 42, 50, 93, 2, 13, 4, 82, 40, 100, 97, 85, 46, 3, 75, 55, 41, 59, 74, 35 };
+    // const contents = [25]f64{ 12, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970 };
     for (0..n) |i| {
         for (0..p) |j| {
             a.data[i][j] = contents[(i * p) + j];
@@ -1510,24 +1538,58 @@ test "Eigen decomposition" {
     std.debug.print("D:\n", .{});
     try D.print();
 
-    const P_inverse = try P.gaussian_elimination(identity, allocator);
-    std.debug.print("P_inverse[1]:\n", .{});
-    try P_inverse[1].print();
+    // const P_inverse = try P.gaussian_elimination(identity, allocator);
+    const QR = try P.qr(allocator);
+    var Q = QR[0];
+    defer Q.deinit(allocator);
+    var R = QR[1];
+    defer R.deinit(allocator);
+    const R_echelons = try R.gaussian_elimination(identity, allocator);
+    const R_inv = R_echelons[1];
+    defer R_inv.deinit(allocator);
+    const P_inverse = try R_inv.mult_bt(Q, allocator);
+    defer P_inverse.deinit(allocator);
+    std.debug.print("P_inverse:\n", .{});
+    try P_inverse.print();
+
+    // std.debug.print("P_inverse[1]:\n", .{});
+    // try P_inverse[1].print();
     const PD = try P.mult(D, allocator);
     std.debug.print("PD:\n", .{});
     try PD.print();
-    const a_reconstituted = try PD.mult(P_inverse[1], allocator);
+    // const a_reconstituted = try PD.mult(P_inverse[1], allocator);
+    const a_reconstituted = try PD.mult(P_inverse, allocator);
     std.debug.print("a_reconstituted:\n", .{});
     try a_reconstituted.print();
 
     // Checking in R
     // x = c(912, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 943, 34, 5, 156, 12, 56, 997, 312, 546, 7, 28, 586, 970)
-    // X = matrix(x, nrow=5)
+    // x = c(12, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970)
+    // X = matrix(x, nrow=5, byrow=TRUE)
     // det(X)
     // E = eigen(X)
     // P = E$vectors
     // D = diag(E$values)
     // Y = P %*% D %*% solve(P)
     // sum(abs(X - Y)) < 0.000001
+    // L = diag(E$values[1], nrow=5)
+    // (X - L)
+    // solve(X - L)
+    // solve(X - L) %*% (X-L)
 
 }
+
+// a = c(-1167.7226+0.0005i,  22.0000+0.0000i,  35.0000+0.0000i,  64.0000+0.0000i,  2.0000+0.0000i,
+//  16.0000+0.0000i, -207.7226+0.0005i,  81.0000+0.0000i,  19.0000+0.0000i,  100.0000+0.0000i,
+//  101.0000+0.0000i,  312.0000+0.0000i, -1036.7226+0.0005i,  34.0000+0.0000i,  5.0000+0.0000i,
+//  156.0000+0.0000i,  12.0000+0.0000i,  56.0000+0.0000i, -1082.7226+0.0005i,  312.0000+0.0000i,
+//  546.0000+0.0000i,  7.0000+0.0000i,  28.0000+0.0000i,  586.0000+0.0000i, -209.7226+0.0005i)
+// A = matrix(a, byrow=T, nrow=5)
+
+// q = c(0.0195+-0.0000i,  0.0099+-0.0000i,  0.0036+-0.0000i,  0.0212+-0.0000i,  0.0366+-0.0000i,
+// 0.3367+-0.0002i,  0.1604+-0.0001i,  0.0592+-0.0000i,  0.3515+-0.0002i,  0.6040+-0.0004i,
+// 0.1118+-0.0001i,  0.0535+-0.0000i,  0.0187+-0.0000i,  0.1168+-0.0001i,  0.2007+-0.0001i,
+// 0.1772+-0.0001i,  0.0872+-0.0001i,  0.0313+-0.0000i,  0.1841+-0.0001i,  0.3179+-0.0002i,
+// 0.5720+-0.0004i,  0.2818+-0.0002i,  0.1013+-0.0001i,  0.5971+-0.0004i,  1.0258+-0.0007i)
+// Q = matrix(q, byrow=T, nrow=5)
+// Q %*% A
