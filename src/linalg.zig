@@ -816,7 +816,7 @@ fn Matrix(comptime T: type) type {
                 A = try self.clone_into_complex(allocator);
             }
             defer A.deinit(allocator);
-            const max_iter: usize = 1_000;
+            const max_iter: usize = 10_000;
             var eigenvalues = try Matrix(C).init(self.n, 1, allocator);
             var eigenvectors = try Matrix(F).init_complex(self.n, self.p, allocator);
             var shifter: C = undefined;
@@ -871,7 +871,7 @@ fn Matrix(comptime T: type) type {
                     }
                     const Aij_over_max_Aii_Ajj = divide(C, absolute(C, A.data[i][0]), max_Aii_Ajj);
                     // std.debug.print("Aij_over_max_Aii_Ajj={any}\n", .{Aij_over_max_Aii_Ajj});
-                    if (less_than(C, Aij_over_max_Aii_Ajj, as(f64, C, 0.001))) {
+                    if (less_than(C, Aij_over_max_Aii_Ajj, as(f64, C, 0.0001))) {
                         n_threshold_passed += 1;
                         // A.data[i][0] = as(f64, C, 0.0);
                     }
@@ -898,21 +898,26 @@ fn Matrix(comptime T: type) type {
             // Update with the final eigenvalue
             eigenvalues.data[n_eigens_finished][0] = A.data[A.n - 1][A.n - 1];
             // Extract eigenvectors
+            // We will use Gaussian elimination to solve for the eigenvector, v, where (A-lI)v = b, where l is an eigenvalue, I is an identity matrix, and b is a vector of ones
+            // (Note: mathematically b should be zeros, but algorithmically to get the eigenvector we set b to onees instead of zeros)
+            // It is critical to normalise (divide by sqrt(sum(v^2)) the eigenvectors so that they map to the basis vectors, i.e. squares sum up to 1).
+            var A_minus_lambda: Matrix(C) = undefined;
+            defer A_minus_lambda.deinit(allocator);
+            if (T == C) {
+                A = try self.clone(allocator);
+                A_minus_lambda = try self.clone(allocator);
+            } else {
+                A = try self.clone_into_complex(allocator);
+                A_minus_lambda = try self.clone_into_complex(allocator);
+            }
             const identity = try Matrix(F).init_fill_complex(self.n, 1, 1.00, allocator);
-            // const identity = try Matrix(F).init_identity_complex(A.n, allocator);
             defer identity.deinit(allocator);
             for (0..eigenvalues.n) |j| {
-                if (T == C) {
-                    A = try self.clone(allocator);
-                } else {
-                    A = try self.clone_into_complex(allocator);
-                }
                 const lambda: C = eigenvalues.data[j][0];
-                for (0..A.n) |ix| {
-                    A.data[ix][ix] = subtract(C, A.data[ix][ix], lambda);
-                    // A.data[ix][ix] = add(C, subtract(C, A.data[ix][ix], lambda), as(f64, C, 1.00));
+                for (0..A_minus_lambda.n) |ix| {
+                    A_minus_lambda.data[ix][ix] = subtract(C, A.data[ix][ix], lambda);
                 }
-                const V = try A.gaussian_elimination(identity, allocator);
+                const V = try A_minus_lambda.gaussian_elimination(identity, allocator);
                 defer V[0].deinit(allocator);
                 defer V[1].deinit(allocator);
                 var norm: C = multiply(C, V[1].data[0][0], V[1].data[0][0]);
@@ -923,12 +928,11 @@ fn Matrix(comptime T: type) type {
                 for (0..eigenvectors.n) |i| {
                     // eigenvectors.data[i][j] = V[1].data[i][0];
                     eigenvectors.data[i][j] = divide(C, V[1].data[i][0], norm);
-                    // eigenvectors.data[i][j] = subtract(C, V[1].data[i][0], as(f64, C, 1.00));
                 }
-                const TEST = try A.mult(V[1], allocator);
+                const TEST = try A_minus_lambda.mult(V[1], allocator);
                 defer TEST.deinit(allocator);
                 std.debug.print("i:{any}\n", .{j});
-                try A.print();
+                try A_minus_lambda.print();
                 try V[0].print();
                 try V[1].print();
                 try eigenvectors.print();
@@ -1561,6 +1565,14 @@ test "Eigen decomposition" {
     const a_reconstituted = try PD.mult(P_inverse, allocator);
     std.debug.print("a_reconstituted:\n", .{});
     try a_reconstituted.print();
+    const C: type = @TypeOf(a_reconstituted.data[0][0]);
+    for (0..a.n) |i| {
+        for (0..a.p) |j| {
+            const abs_diff = absolute(C, subtract(C, as(f64, C, a.data[i][j]), a_reconstituted.data[i][j]));
+            // std.debug.print("abs_diff={any}\n", .{abs_diff});
+            try expect(less_than(C, abs_diff, as(f64, C, 1.0)));
+        }
+    }
 
     // Checking in R
     // x = c(912, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 943, 34, 5, 156, 12, 56, 997, 312, 546, 7, 28, 586, 970)
