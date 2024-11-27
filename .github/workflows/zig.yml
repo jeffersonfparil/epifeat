@@ -19,9 +19,9 @@ jobs:
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: ${{ matrix.zig-version }}
-      - name: Test io.zig
+      - name: Test I/O
         run: time zig test src/io.zig
-      - name: Test linalg.zig
+      - name: Test Linear Algebra
         run: time zig test src/linalg.zig
-      - name: Test stats.zig
+      - name: Test Statistics
         run: time zig test src/stats.zig

@@ -13,4 +13,6 @@ test "io" {
     const fname = "test.tmp";
     const out = try write(fname);
     try expect(std.mem.eql(u8, fname, out));
+    // Clean-up
+    try std.fs.cwd().deleteFile(fname);
 }

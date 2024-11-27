@@ -16,6 +16,7 @@ const MatrixError = error{
     SingularMatrix,
     NullDataInMatrix,
     ComplexNumber,
+    ConvergenceFailure,
     OutOfMemory,
 };
 
@@ -507,7 +508,7 @@ fn Matrix(comptime T: type) type {
         /// Additionally updates the determinant of self
         /// Applicable for square and non-square matrices
         /// Note that non-square matrices do not have determinants
-        pub fn gaussian_elimination(self: *Self, b: Self, allocator: Allocator) ![2]Self {
+        pub fn gaussian_elimination(self: *Self, b: Self, error_on_zero_determinant: bool, allocator: Allocator) ![2]Self {
             // Make sure the two matrices have the same number of rows
             if (self.n != b.n) {
                 return MatrixError.IncompatibleMatrices;
@@ -545,7 +546,7 @@ fn Matrix(comptime T: type) type {
             // Forward: from the upper-left corner to the lower-right corner
             for (0..self_echelon.n) |i| {
                 const a_ii = self_echelon.data[i][i];
-                if (less_than(T, absolute(T, a_ii), as(f64, T, 0.000001))) {
+                if (error_on_zero_determinant and less_than(T, absolute(T, a_ii), as(f64, T, 0.000001))) {
                     return MatrixError.SingularMatrix;
                 }
                 determinant = multiply(T, determinant, a_ii);
@@ -724,7 +725,9 @@ fn Matrix(comptime T: type) type {
             for (0..n) |i| {
                 indexes[i] = i;
             }
+            // Using Householder transformation (assumes dense matrix)
             // Iterate per column
+            var probably_sparse: bool = false;
             var H: Self = undefined;
             defer H.deinit(allocator);
             for (0..p) |j| {
@@ -746,10 +749,14 @@ fn Matrix(comptime T: type) type {
                 // NOTE: Skip the Householder transformation if the slice (a) is sparse which leads to NaNs
                 if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
                     if (std.math.isNan(h.data[0][0].re)) {
+                        probably_sparse = true;
+                        // break;
                         continue;
                     }
                 } else {
                     if (std.math.isNan(h.data[0][0])) {
+                        probably_sparse = true;
+                        // break;
                         continue;
                     }
                 }
@@ -774,6 +781,53 @@ fn Matrix(comptime T: type) type {
                     }
                 }
             }
+            // Use Given's rotation instead of Householder transformation if the matrix is too sparse
+            // if (probably_sparse) {
+            //     // Iterate across columns
+            //     var G: Self = undefined;
+            //     defer G.deinit(allocator);
+            //     for (0..R.p) |j| {
+            //         var i: usize = 0;
+            //         var a: T = undefined;
+            //         var b: T = undefined;
+            //         var c: T = undefined;
+            //         var s: T = undefined;
+            //         var r: T = undefined;
+            //         for (j..R.n) |i_rev| {
+            //             i = (R.n - 1) - i_rev;
+            //             a = R.data[j][i];
+            //             b = R.data[i][j];
+            //             // Rotate
+            //             if (equal_to(T, b, as(f64, T, 0.0))) {
+            //                 c = as(f64, T, 1.00);
+            //                 s = as(f64, T, 0.00);
+            //             } else {
+            //                 r = square_root(T, add(T, multiply(T, a, a), multiply(T, b, b)));
+            //                 c = divide(T, a, r);
+            //                 s = divide(T, negative(T, b), r);
+            //             }
+            //             G.data[i][i] = c;
+            //             G.data[j][j] = c;
+            //             G.data[i][j] = negative(T, s);
+            //             G.data[j][i] = s;
+            //         }
+            //         // Multiple Q by the H
+            //         const Q_mult = try Q.mult(H, allocator);
+            //         defer Q_mult.deinit(allocator);
+            //         // Multiple H by R
+            //         const R_mult = try H.mult(R, allocator);
+            //         defer R_mult.deinit(allocator);
+            //         // Update Q and R
+            //         for (0..n) |Q_i| {
+            //             for (0..n) |Q_j| {
+            //                 Q.data[Q_i][Q_j] = Q_mult.data[Q_i][Q_j];
+            //                 if (Q_j < R.p) {
+            //                     R.data[Q_i][Q_j] = R_mult.data[Q_i][Q_j];
+            //                 }
+            //             }
+            //         }
+            //     }
+            // }
             return .{ Q, R };
         }
         /// Cholesky decomposition (Ref: https://rosettacode.org/wiki/Cholesky_decomposition)
@@ -925,7 +979,7 @@ fn Matrix(comptime T: type) type {
                         // A.data[i][0] = as(f64, C, 0.0);
                     }
                 }
-                std.debug.print("A.n={any}; n_threshold_passed={any}\n", .{ A.n, n_threshold_passed });
+                // std.debug.print("A.n={any}; n_threshold_passed={any}\n", .{ A.n, n_threshold_passed });
                 if (n_threshold_passed == (A.n - 1)) {
                     eigenvalues.data[n_eigens_finished][0] = A.data[0][0];
                     n_eigens_finished += 1;
@@ -940,18 +994,20 @@ fn Matrix(comptime T: type) type {
                     // std.debug.print("A:\n", .{});
                     // try A.print();
                 }
-
                 if (A.n < 2) {
                     break;
                 }
             }
             // Update with the final eigenvalue
-            eigenvalues.data[n_eigens_finished][0] = A.data[A.n - 1][A.n - 1];
+            if (n_eigens_finished < (A.n - 1)) {
+                return MatrixError.ConvergenceFailure;
+            } else {
+                eigenvalues.data[n_eigens_finished][0] = A.data[A.n - 1][A.n - 1];
+            }
             // std.debug.print("n_eigens_finished={any}\n", .{n_eigens_finished});
             // std.debug.print("A.data[A.n - 1][A.n - 1]={any}:\n", .{A.data[A.n - 1][A.n - 1]});
             // std.debug.print("eigenvalues:\n", .{});
             // try eigenvalues.print();
-
             // Extract eigenvectors
             // We will use Gaussian elimination to solve for the eigenvector, v, where (A-lI)v = b, where l is an eigenvalue, I is an identity matrix, and b is a vector of ones
             // (Note: mathematically b should be zeros, but algorithmically to get the eigenvector we set b to onees instead of zeros)
@@ -965,14 +1021,17 @@ fn Matrix(comptime T: type) type {
                 A = try self.clone_into_complex(allocator);
                 A_minus_lambda = try self.clone_into_complex(allocator);
             }
-            const identity = try Matrix(F).init_fill_complex(self.n, 1, 1.00, allocator);
-            defer identity.deinit(allocator);
+            const v = try Matrix(F).init_fill_complex(self.n, 1, 1.00, allocator);
+            defer v.deinit(allocator);
             for (0..eigenvalues.n) |j| {
                 const lambda: C = eigenvalues.data[j][0];
                 for (0..A_minus_lambda.n) |ix| {
                     A_minus_lambda.data[ix][ix] = subtract(C, A.data[ix][ix], lambda);
                 }
-                const V = try A_minus_lambda.gaussian_elimination(identity, allocator);
+                std.debug.print("i:{any}\n", .{j});
+                try A_minus_lambda.print();
+                // NOTE: We are allowing zero determinant here because (A-lambdaI)v = 0
+                const V = try A_minus_lambda.gaussian_elimination(v, false, allocator);
                 defer V[0].deinit(allocator);
                 defer V[1].deinit(allocator);
                 var norm: C = multiply(C, V[1].data[0][0], V[1].data[0][0]);
@@ -981,27 +1040,8 @@ fn Matrix(comptime T: type) type {
                 }
                 norm = square_root(C, norm);
                 for (0..eigenvectors.n) |i| {
-                    // eigenvectors.data[i][j] = V[1].data[i][0];
                     eigenvectors.data[i][j] = divide(C, V[1].data[i][0], norm);
                 }
-                // const TEST = try A_minus_lambda.mult(V[1], allocator);
-                // defer TEST.deinit(allocator);
-                // std.debug.print("i:{any}\n", .{j});
-                // try A_minus_lambda.print();
-                // try V[0].print();
-                // try V[1].print();
-                // std.debug.print("i:{any}\n", .{j});
-                // std.debug.print("norm={any}\n", .{norm});
-                // std.debug.print("A:\n", .{});
-                // try A.print();
-                // std.debug.print("lambda={any}\n", .{lambda});
-                // std.debug.print("A_minus_lambda:\n", .{});
-                // try A_minus_lambda.print();
-                // std.debug.print("v:\n", .{});
-                // try V[1].print();
-                // std.debug.print("eigenvectors:\n", .{});
-                // try eigenvectors.print();
-                // try TEST.print();
             }
             // std.debug.print("Eigenvalues:\n", .{});
             // try eigenvalues.print();
@@ -1345,7 +1385,7 @@ test "Gaussian elimination" {
 
     // Gaussian elimination
     var timer = try std.time.Timer.start();
-    const echelons = try a.gaussian_elimination(identity, allocator);
+    const echelons = try a.gaussian_elimination(identity, true, allocator);
     const time_elapsed = timer.read();
     std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
 
@@ -1437,7 +1477,7 @@ test "LU decomposition" {
     // Rewriting we have: LUX = PI -> LUX = P
     // We can now solve for X by gausian ellimination given the augmented matrix: LU|P, i.e. using elementary operations to convert LU into I we get P turned into X (the inverse of A)
     var LU = try out_test[1].mult(out_test[2], allocator);
-    const out_gauss = try LU.gaussian_elimination(out_test[0], allocator);
+    const out_gauss = try LU.gaussian_elimination(out_test[0], true, allocator);
     defer out_gauss[0].deinit(allocator);
     defer out_gauss[1].deinit(allocator);
     const should_be_identity = try a.mult(out_gauss[1], allocator);
@@ -1503,7 +1543,7 @@ test "QR decomposition" {
     std.debug.print("R\n", .{});
     try R.print();
 
-    const R_echelons = try R.gaussian_elimination(identity, allocator);
+    const R_echelons = try R.gaussian_elimination(identity, true, allocator);
     const R_inv = R_echelons[1];
     defer R_inv.deinit(allocator);
     const a_inv = try R_inv.mult_bt(Q, allocator);
@@ -1653,13 +1693,13 @@ test "Eigen decomposition" {
     std.debug.print("D:\n", .{});
     try D.print();
 
-    // const P_inverse = try P.gaussian_elimination(identity, allocator);
+    // const P_inverse = try P.gaussian_elimination(identity, true, allocator);
     const QR = try P.qr(allocator);
     var Q = QR[0];
     defer Q.deinit(allocator);
     var R = QR[1];
     defer R.deinit(allocator);
-    const R_echelons = try R.gaussian_elimination(identity, allocator);
+    const R_echelons = try R.gaussian_elimination(identity, true, allocator);
     const R_inv = R_echelons[1];
     defer R_inv.deinit(allocator);
     const P_inverse = try R_inv.mult_bt(Q, allocator);
@@ -1714,6 +1754,7 @@ test "Singular value decomposition" {
     var a = try Matrix(f64).init(n, p, allocator);
     defer a.deinit(allocator);
     const contents = [50]f64{ 912, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 943, 34, 5, 156, 12, 56, 997, 312, 546, 7, 28, 586, 970, 12, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970 };
+    // const contents = [25]f64{ 912, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 943, 34, 5, 156, 12, 56, 997, 312, 546, 7, 28, 586, 970 };
     for (0..n) |i| {
         for (0..p) |j| {
             a.data[i][j] = contents[(i * p) + j];
@@ -1726,9 +1767,9 @@ test "Singular value decomposition" {
     std.debug.print("identity={any}\n", .{identity});
 
     // Eigenvalues and eigenvectors
-    // var timer = try std.time.Timer.start();
-    // const svd_out = try a.svd(f64, allocator);
-    // const time_elapsed = timer.read();
-    // std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
-    // try svd_out[0].print();
+    var timer = try std.time.Timer.start();
+    const svd_out = try a.svd(f64, allocator);
+    const time_elapsed = timer.read();
+    std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
+    try svd_out[0].print();
 }
