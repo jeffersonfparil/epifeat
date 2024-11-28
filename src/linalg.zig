@@ -251,8 +251,8 @@ fn Matrix(comptime T: type) type {
             if (n > 30) {
                 n = 30;
             }
-            if (p > 7) {
-                p = 7;
+            if (p > 10) {
+                p = 10;
             }
             for (0..n) |i| {
                 if (i == 0) {
@@ -544,10 +544,63 @@ fn Matrix(comptime T: type) type {
             // std.debug.print("[BEFORE]\n", .{});
             // try self_echelon.print();
             // Forward: from the upper-left corner to the lower-right corner
-            for (0..self_echelon.n) |i| {
-                const a_ii = self_echelon.data[i][i];
-                if (error_on_zero_determinant and less_than(T, absolute(T, a_ii), as(f64, T, 0.000001))) {
-                    return MatrixError.SingularMatrix;
+            // Switch row if a_ii is zero if error_on_zero_determinant == false
+            outer: for (0..self_echelon.n) |i| {
+                var a_ii = self_echelon.data[i][i];
+                if (less_than(T, absolute(T, a_ii), as(f64, T, 0.000001))) {
+                    if (error_on_zero_determinant) {
+                        return MatrixError.SingularMatrix;
+                    } else {
+                        // return MatrixError.NullDataInMatrix;
+                        // continue;
+                        // std.debug.print("i={any}; a_ii={any}\n", .{ i, a_ii });
+                        // std.debug.print("self:\n", .{});
+                        // try self.print();
+                        // std.debug.print("self_echelon:\n", .{});
+                        // try self_echelon.print();
+                        var row_switch: usize = i;
+                        inner: for (i + 1..self.n) |ix| {
+                            const a_ixi = self_echelon.data[ix][i];
+                            if (greater_than(T, absolute(T, a_ixi), as(f64, T, 0.000001))) {
+                                row_switch = ix;
+                                break :inner;
+                            }
+                        }
+                        if (row_switch == i) {
+                            if (row_switch < (self_echelon.n - 1)) {
+                                return MatrixError.SingularMatrix;
+                            }
+                            break :outer;
+                        }
+                        // Switch row i with row_switch
+                        var buffer_val: T = undefined;
+                        for (0..self.p) |j| {
+                            buffer_val = self_echelon.data[i][j];
+                            self_echelon.data[i][j] = self_echelon.data[row_switch][j];
+                            self_echelon.data[row_switch][j] = buffer_val;
+                        }
+                        for (0..b.p) |j| {
+                            buffer_val = b_echelon.data[i][j];
+                            b_echelon.data[i][j] = b_echelon.data[row_switch][j];
+                            b_echelon.data[row_switch][j] = buffer_val;
+                        }
+                        // Set leading columns at pivotted new row to zeros
+                        for (0..i) |k| {
+                            const a_i_1k: T = self_echelon.data[i][k];
+                            for (0..self_echelon.p) |j| {
+                                self_echelon.data[i][j] = subtract(T, self_echelon.data[i][j], multiply(T, a_i_1k, self_echelon.data[k][j]));
+                            }
+                            for (0..b_echelon.p) |j| {
+                                b_echelon.data[i][j] = subtract(T, b_echelon.data[i][j], multiply(T, a_i_1k, b_echelon.data[k][j]));
+                            }
+                        }
+                        // Redefine a_ii
+                        a_ii = self_echelon.data[i][i];
+                        // std.debug.print("row_switch={any}; a_ii={any}\n", .{ row_switch, a_ii });
+                        if (less_than(T, absolute(T, a_ii), as(f64, T, 0.000001))) {
+                            continue;
+                        }
+                    }
                 }
                 determinant = multiply(T, determinant, a_ii);
                 // Set the digonals as one
@@ -586,6 +639,36 @@ fn Matrix(comptime T: type) type {
                 // std.debug.print("determinant={any}\n", .{determinant});
                 self.determinant = determinant;
             }
+
+            // Check zero rows in self_echelon and set corresponding row in b_echelon to zero to avoid bias
+            for (0..self_echelon.n) |i| {
+                if (less_than(T, absolute(T, self_echelon.data[i][i]), as(f64, T, 0.00000001))) {
+                    // std.debug.print("self_echelon:\n", .{});
+                    // try self_echelon.print();
+
+                    // std.debug.print("b_echelon:\n", .{});
+                    // try b_echelon.print();
+
+                    for (0..b_echelon.p) |j| {
+                        // b_echelon.data[i][j] = divide(T, self_echelon.data[i][i], self_echelon.data[i][i]);
+                        if (less_than(T, self_echelon.data[i][i], as(f64, T, 0.0))) {
+                            b_echelon.data[i][j] = as(f64, T, 1.00);
+                        } else {
+                            b_echelon.data[i][j] = as(f64, T, -1.00);
+                        }
+                    }
+                    self_echelon.data[i][i] = as(f64, T, 1.0);
+
+                    // for (0..self_echelon.p) |j| {
+                    //     self_echelon.data[i][j] = as(f64, T, 0.0);
+                    // }
+                }
+            }
+
+            // std.debug.print("[PRIOR TO REVERSE SUBS. self_echelon]\n", .{});
+            // try self_echelon.print();
+            // std.debug.print("[PRIOR TO REVERSE SUBS. b_echelon]\n", .{});
+            // try b_echelon.print();
             // Reverse: from the lower-right corner to the upper-left corner
             for (0..self_echelon.n) |i_inverse| {
                 const i: usize = self_echelon.n - (i_inverse + 1);
@@ -781,53 +864,6 @@ fn Matrix(comptime T: type) type {
                     }
                 }
             }
-            // Use Given's rotation instead of Householder transformation if the matrix is too sparse
-            // if (probably_sparse) {
-            //     // Iterate across columns
-            //     var G: Self = undefined;
-            //     defer G.deinit(allocator);
-            //     for (0..R.p) |j| {
-            //         var i: usize = 0;
-            //         var a: T = undefined;
-            //         var b: T = undefined;
-            //         var c: T = undefined;
-            //         var s: T = undefined;
-            //         var r: T = undefined;
-            //         for (j..R.n) |i_rev| {
-            //             i = (R.n - 1) - i_rev;
-            //             a = R.data[j][i];
-            //             b = R.data[i][j];
-            //             // Rotate
-            //             if (equal_to(T, b, as(f64, T, 0.0))) {
-            //                 c = as(f64, T, 1.00);
-            //                 s = as(f64, T, 0.00);
-            //             } else {
-            //                 r = square_root(T, add(T, multiply(T, a, a), multiply(T, b, b)));
-            //                 c = divide(T, a, r);
-            //                 s = divide(T, negative(T, b), r);
-            //             }
-            //             G.data[i][i] = c;
-            //             G.data[j][j] = c;
-            //             G.data[i][j] = negative(T, s);
-            //             G.data[j][i] = s;
-            //         }
-            //         // Multiple Q by the H
-            //         const Q_mult = try Q.mult(H, allocator);
-            //         defer Q_mult.deinit(allocator);
-            //         // Multiple H by R
-            //         const R_mult = try H.mult(R, allocator);
-            //         defer R_mult.deinit(allocator);
-            //         // Update Q and R
-            //         for (0..n) |Q_i| {
-            //             for (0..n) |Q_j| {
-            //                 Q.data[Q_i][Q_j] = Q_mult.data[Q_i][Q_j];
-            //                 if (Q_j < R.p) {
-            //                     R.data[Q_i][Q_j] = R_mult.data[Q_i][Q_j];
-            //                 }
-            //             }
-            //         }
-            //     }
-            // }
             return .{ Q, R };
         }
         /// Cholesky decomposition (Ref: https://rosettacode.org/wiki/Cholesky_decomposition)
@@ -1028,17 +1064,24 @@ fn Matrix(comptime T: type) type {
                 for (0..A_minus_lambda.n) |ix| {
                     A_minus_lambda.data[ix][ix] = subtract(C, A.data[ix][ix], lambda);
                 }
-                std.debug.print("i:{any}\n", .{j});
-                try A_minus_lambda.print();
+                // std.debug.print("i:{any}\n", .{j});
+                // std.debug.print("A_minus_lambda:\n", .{});
+                // try A_minus_lambda.print();
                 // NOTE: We are allowing zero determinant here because (A-lambdaI)v = 0
                 const V = try A_minus_lambda.gaussian_elimination(v, false, allocator);
                 defer V[0].deinit(allocator);
                 defer V[1].deinit(allocator);
+
+                // std.debug.print("V[1]:\n", .{});
+                // try V[1].print();
+
+                // Make the eigenvectors orthonormal (i.e. sum(v_ij^2) = 1.00)
                 var norm: C = multiply(C, V[1].data[0][0], V[1].data[0][0]);
                 for (1..V[1].n) |i| {
                     norm = add(C, norm, multiply(C, V[1].data[i][0], V[1].data[i][0]));
                 }
                 norm = square_root(C, norm);
+                // std.debug.print("norm={any}\n", .{norm});
                 for (0..eigenvectors.n) |i| {
                     eigenvectors.data[i][j] = divide(C, V[1].data[i][0], norm);
                 }
@@ -1054,24 +1097,100 @@ fn Matrix(comptime T: type) type {
         /// U = eigenvectors of MM*; V* = eigenvectors of M*M; and diagonals of S = square roots of the eigenvalues of M*M and MM*
         pub fn svd(self: Matrix(T), comptime F: type, allocator: Allocator) ![3]Matrix(Complex(F)) {
             const C: type = Complex(F);
-            var M_: Matrix(C) = try self.clone_into_complex(allocator);
-            const M: Matrix(C) = try self.clone_into_complex(allocator);
-            defer M.deinit(allocator);
-            const MMstar = try M_.mult_bt(M, allocator);
-            std.debug.print("MMstar:\n", .{});
-            try MMstar.print();
+            const A: Matrix(C) = try self.clone_into_complex(allocator);
+            defer A.deinit(allocator);
+            // // Golub-Kahan bidiagonalisation
+            // var n: usize = A.n;
+            // if (n > A.p) {
+            //     n = A.p;
+            // }
+            // var Q = try Matrix(F).init_identity_complex(A.n, allocator);
+            // var P = try Matrix(F).init_identity_complex(A.p, allocator);
+            // // Initialise the array of indexes for slicing and Housefolder reflection
+            // const indexes: []usize = try allocator.alloc(usize, n);
+            // defer allocator.free(indexes);
+            // for (0..n) |i| {
+            //     indexes[i] = i;
+            // }
+            // for (0..n) |i| {
+            //     const a = try A.slice(indexes[i..], indexes[i..(i + 1)], allocator);
+            //     const h = try a.reflect_householder(allocator);
+            //     defer a.deinit(allocator);
+            //     defer h.deinit(allocator);
+            // }
 
-            const MstarM = try M_.mult_at(M, allocator);
-            std.debug.print("MstarM:\n", .{});
-            try MstarM.print();
+            // var M_: Matrix(C) = try self.clone_into_complex(allocator);
+            // const M: Matrix(C) = try self.clone_into_complex(allocator);
+            // defer M.deinit(allocator);
+            // const MMstar = try M_.mult_bt(M, allocator);
+            // // std.debug.print("MMstar:\n", .{});
+            // // try MMstar.print();
 
-            const left_eigens = try MMstar.eigendecomposition_QR(F, allocator);
-            defer left_eigens[0].deinit(allocator);
-            defer left_eigens[1].deinit(allocator);
-            std.debug.print("Eigen values for SVD:\n", .{});
-            try left_eigens[0].print();
+            // const MstarM = try M_.mult_at(M, allocator);
+            // // std.debug.print("MstarM:\n", .{});
+            // // try MstarM.print();
 
-            return .{ MMstar, MstarM, left_eigens[0] };
+            // const left_eigens = try MMstar.eigendecomposition_QR(F, allocator);
+            // defer left_eigens[0].deinit(allocator);
+            // defer left_eigens[1].deinit(allocator);
+
+            // const right_eigens = try MstarM.eigendecomposition_QR(F, allocator);
+            // defer right_eigens[0].deinit(allocator);
+            // defer right_eigens[1].deinit(allocator);
+
+            // // std.debug.print("U:\n", .{});
+            // // try left_eigens[1].print();
+
+            // // std.debug.print("V:\n", .{});
+            // // try right_eigens[1].print();
+
+            // // std.debug.print("S_left:\n", .{});
+            // // try left_eigens[0].print();
+
+            // // std.debug.print("S_right:\n", .{});
+            // // try right_eigens[0].print();
+
+            // var n: usize = self.n;
+            // var p: usize = self.p;
+            // if (self.n > self.p) {
+            //     n = self.p;
+            //     p = self.n;
+            // }
+            // var row_indexes: []usize = try allocator.alloc(usize, p);
+            // var col_indexes: []usize = try allocator.alloc(usize, n);
+            // defer allocator.free(row_indexes);
+            // defer allocator.free(col_indexes);
+            // for (0..p) |i| {
+            //     row_indexes[i] = i;
+            // }
+            // for (0..n) |j| {
+            //     col_indexes[j] = j;
+            // }
+            // const U = try left_eigens[1].slice(row_indexes, col_indexes, allocator);
+            // const V = try right_eigens[1].slice(col_indexes, col_indexes, allocator);
+            // var S = try Matrix(F).init_fill_complex(n, n, as(f64, F, 0.0), allocator);
+            // const m: usize = left_eigens[0].n;
+            // var j: usize = 0;
+            // for (0..n) |i| {
+            //     if (j < m) {
+            //         if (greater_than(C, absolute(C, left_eigens[0].data[j][0]), as(f64, C, 0.00000001))) {
+            //             S.data[i][i] = square_root(C, left_eigens[0].data[j][0]);
+            //         }
+            //         j += 1;
+            //     } else {
+            //         if (greater_than(C, absolute(C, right_eigens[0].data[j - m][0]), as(f64, C, 0.00000001))) {
+            //             S.data[i][i] = square_root(C, right_eigens[0].data[j - m][0]);
+            //         }
+            //         j += 1;
+            //     }
+            // }
+
+            // return .{ U, S, V };
+
+            const U = try Matrix(F).init_complex(1, 1, allocator);
+            const S = try Matrix(F).init_complex(1, 1, allocator);
+            const V = try Matrix(F).init_complex(1, 1, allocator);
+            return .{ U, S, V };
         }
     };
 }
@@ -1657,7 +1776,7 @@ test "Eigen decomposition" {
     defer a.deinit(allocator);
     var b = try Matrix(f64).init(n, p, allocator);
     defer b.deinit(allocator);
-    const contents = [25]f64{ 912, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 943, 34, 5, 156, 12, 56, 997, 312, 546, 7, 28, 586, 970 };
+    const contents = [25]f64{ 12, 22, 35, 64, 2, 16, 172, 81, 19, 100, 101, 312, 243, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 70 };
     // const contents = [25]f64{ 12, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970 };
     for (0..n) |i| {
         for (0..p) |j| {
@@ -1726,7 +1845,7 @@ test "Eigen decomposition" {
     }
 
     // Checking in R
-    // x = c(912, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 943, 34, 5, 156, 12, 56, 997, 312, 546, 7, 28, 586, 970)
+    // x = c(12, 22, 35, 64, 2, 16, 172, 81, 19, 100, 101, 312, 243, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 70)
     // x = c(12, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970)
     // X = matrix(x, nrow=5, byrow=TRUE)
     // det(X)
@@ -1766,10 +1885,39 @@ test "Singular value decomposition" {
     try a.print();
     std.debug.print("identity={any}\n", .{identity});
 
-    // Eigenvalues and eigenvectors
+    // SVD
     var timer = try std.time.Timer.start();
     const svd_out = try a.svd(f64, allocator);
     const time_elapsed = timer.read();
     std.debug.print("Time elapsed: {any}\n", .{time_elapsed});
+    std.debug.print("U:\n", .{});
     try svd_out[0].print();
+    std.debug.print("S:\n", .{});
+    try svd_out[1].print();
+    std.debug.print("V:\n", .{});
+    try svd_out[2].print();
+
+    var US = try svd_out[0].mult(svd_out[1], allocator);
+    std.debug.print("US:\n", .{});
+    try US.print();
+
+    const USV = try US.mult(svd_out[2], allocator);
+    std.debug.print("USV:\n", .{});
+    try USV.print();
+
+    for (0..n) |i| {
+        for (0..p) |j| {
+            try expect(absolute(f64, subtract(f64, a.data[i][j], USV.data[i][j].re)) < 1.00);
+        }
+    }
+
+    // In R:
+    // X = matrix(c(912, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 943, 34, 5, 156, 12, 56, 997, 312, 546, 7, 28, 586, 970, 12, 22, 35, 64, 2, 16, 972, 81, 19, 100, 101, 312, 143, 34, 5, 156, 12, 56, 97, 312, 546, 7, 28, 586, 970), byrow=TRUE, nrow=10)
+    // USV = svd(X)
+    // U = USV$u
+    // V = USV$v
+    // S = diag(USV$d)
+    // U %*% S
+    // U %*% S %*% t(V)
+    // X
 }
