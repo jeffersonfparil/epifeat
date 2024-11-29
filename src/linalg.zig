@@ -408,6 +408,23 @@ fn Matrix(comptime T: type) type {
             }
             return product;
         }
+        /// Transpose matrix
+        /// Note: please use this sparingly as it allocates memory for the new matrix it creates
+        pub fn t(self: Self, allocator: Allocator) !Self {
+            var transposed: Matrix(T) = undefined;
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                const F: type = @TypeOf(self.data[0][0].re);
+                transposed = try Matrix(F).init_complex(self.p, self.n, allocator);
+            } else {
+                transposed = try Matrix(T).init(self.p, self.n, allocator);
+            }
+            for (0..self.n) |i| {
+                for (0..self.p) |j| {
+                    transposed.data[j][i] = self.data[i][j];
+                }
+            }
+            return transposed;
+        }
         /// Pivot: rearrange the rows so that the largest value in the ith column is in ith row.
         /// Yields a slice with number of elements equal to the numbrt of rows.
         /// In square matrices this means that the largest values per row are in the diagonals.
@@ -442,6 +459,13 @@ fn Matrix(comptime T: type) type {
         }
         /// Householder reflection
         /// Applicable to column vectors
+        /// d = x[0] + norm(x), if x[0] >= 0
+        /// d = x[0] - norm(x), if x[0] < 0
+        /// v = x/d
+        /// v[0] = 1.00
+        /// m = 2.00 / (vT*v)
+        /// S = v*vT
+        /// H = I - mS
         pub fn reflect_householder(self: Self, allocator: Allocator) !Self {
             // Make sure self is a column vector
             if (self.p != 1) {
@@ -503,6 +527,111 @@ fn Matrix(comptime T: type) type {
             // std.debug.print("H:\n", .{});
             // try H.print();
             return H;
+        }
+        /// Golub-Kahan bidiagonalisation
+        pub fn bidiagonalisation(self: Self, allocator: Allocator) ![3]Self {
+            var P: Matrix(T) = undefined;
+            var B = try self.clone(allocator);
+            var S: Matrix(T) = undefined;
+            if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                const F: type = @TypeOf(self.data[0][0].re);
+                P = try Matrix(F).init_identity_complex(self.n, allocator);
+                S = try Matrix(F).init_identity_complex(self.p, allocator);
+            } else {
+                P = try Matrix(T).init_identity(self.n, allocator);
+                S = try Matrix(T).init_identity(self.p, allocator);
+            }
+            var n: usize = B.n;
+            if (B.p < n) {
+                n = B.p;
+            }
+            var p: usize = B.p;
+            if (B.n > p) {
+                p = B.n;
+            }
+            const indexes: []usize = try allocator.alloc(usize, p);
+            defer allocator.free(indexes);
+            for (0..p) |i| {
+                indexes[i] = i;
+            }
+            std.debug.print("B:\n", .{});
+            try B.print();
+            std.debug.print("P:\n", .{});
+            try P.print();
+            std.debug.print("S:\n", .{});
+            try S.print();
+
+            for (0..(n - 2)) |i| {
+                // From the left
+                const r = try B.slice(indexes[i..B.n], indexes[i..(i + 1)], allocator);
+                const H = try r.reflect_householder(allocator);
+                const u = try P.slice(indexes[0..P.n], indexes[i..P.p], allocator);
+                const a = try B.slice(indexes[i..B.n], indexes[0..B.p], allocator);
+                const uH = try u.mult(H, allocator);
+                const Ha = try H.mult(a, allocator);
+                // std.debug.print("r:\n", .{});
+                // try r.print();
+                // std.debug.print("H:\n", .{});
+                // try H.print();
+                // std.debug.print("u:\n", .{});
+                // try u.print();
+                // std.debug.print("a:\n", .{});
+                // try a.print();
+                // std.debug.print("uH:\n", .{});
+                // try uH.print();
+                // std.debug.print("Ha:\n", .{});
+                // try Ha.print();
+                for (0..P.n, 0..) |ix, iy| {
+                    for (i..P.p, 0..) |jx, jy| {
+                        P.data[ix][jx] = uH.data[iy][jy];
+                    }
+                }
+                for (i..B.n, 0..) |ix, iy| {
+                    for (0..B.p, 0..) |jx, jy| {
+                        B.data[ix][jx] = Ha.data[iy][jy];
+                    }
+                }
+                r.deinit(allocator);
+                H.deinit(allocator);
+                u.deinit(allocator);
+                a.deinit(allocator);
+                uH.deinit(allocator);
+                Ha.deinit(allocator);
+                // From the left
+                if ((i < n) and (i < B.n - 1)) {
+                    const q = try B.slice(indexes[i..(i + 1)], indexes[(i + 1)..B.p], allocator);
+                    const qt = try q.t(allocator);
+                    const Q = try qt.reflect_householder(allocator);
+                    const v = try S.slice(indexes[(i + 1)..S.n], indexes[0..S.p], allocator);
+                    const b = try B.slice(indexes[0..B.n], indexes[(i + 1)..B.p], allocator);
+                    const Qv = try Q.mult(v, allocator);
+                    const bQ = try b.mult(Q, allocator);
+                    for ((i + 1)..S.n, 0..) |ix, iy| {
+                        for (0..S.p) |j| {
+                            S.data[ix][j] = Qv.data[iy][j];
+                        }
+                    }
+                    for (0..B.n) |ix| {
+                        for ((i + 1)..B.p, 0..) |jx, jy| {
+                            B.data[ix][jx] = bQ.data[ix][jy];
+                        }
+                    }
+                    q.deinit(allocator);
+                    qt.deinit(allocator);
+                    Q.deinit(allocator);
+                    v.deinit(allocator);
+                    b.deinit(allocator);
+                    Qv.deinit(allocator);
+                    bQ.deinit(allocator);
+                }
+            }
+            std.debug.print("[[[FINAL P]]]:\n", .{});
+            try P.print();
+            std.debug.print("[[[FINAL B]]]:\n", .{});
+            try B.print();
+            std.debug.print("[[[FINAL S]]]:\n", .{});
+            try S.print();
+            return .{ P, B, S };
         }
         /// Gaussian elimination (Ref: my interpretation of using the elementerary row opertaions to convert self into reduced row and column echelon form)
         /// Additionally updates the determinant of self
@@ -1095,101 +1224,117 @@ fn Matrix(comptime T: type) type {
         /// Singular valude decomposition (Ref: https://builtin.com/articles/svd-algorithm)
         /// Generalisation of eigendecomposition on non-square matrices
         /// U = eigenvectors of MM*; V* = eigenvectors of M*M; and diagonals of S = square roots of the eigenvalues of M*M and MM*
-        pub fn svd(self: Matrix(T), comptime F: type, allocator: Allocator) ![3]Matrix(Complex(F)) {
-            const C: type = Complex(F);
-            const A: Matrix(C) = try self.clone_into_complex(allocator);
-            defer A.deinit(allocator);
-            // // Golub-Kahan bidiagonalisation
-            // var n: usize = A.n;
-            // if (n > A.p) {
-            //     n = A.p;
-            // }
-            // var Q = try Matrix(F).init_identity_complex(A.n, allocator);
-            // var P = try Matrix(F).init_identity_complex(A.p, allocator);
-            // // Initialise the array of indexes for slicing and Housefolder reflection
-            // const indexes: []usize = try allocator.alloc(usize, n);
-            // defer allocator.free(indexes);
-            // for (0..n) |i| {
-            //     indexes[i] = i;
-            // }
-            // for (0..n) |i| {
-            //     const a = try A.slice(indexes[i..], indexes[i..(i + 1)], allocator);
-            //     const h = try a.reflect_householder(allocator);
-            //     defer a.deinit(allocator);
-            //     defer h.deinit(allocator);
-            // }
+        pub fn svd(self: Matrix(T), comptime F: type, allocator: Allocator) ![3]Self {
+            // Make sure that self has dimensions n >= p
+            if (self.n < self.p) {
+                return MatrixError.RowsLessThanColumns;
+            }
+            const PBS = try self.bidiagonalisation(allocator);
+            defer PBS[0].deinit(allocator);
+            defer PBS[1].deinit(allocator);
+            defer PBS[2].deinit(allocator);
+            std.debug.print("P:\n", .{});
+            try PBS[0].print();
+            std.debug.print("B:\n", .{});
+            try PBS[1].print();
+            std.debug.print("S:\n", .{});
+            try PBS[2].print();
 
-            // var M_: Matrix(C) = try self.clone_into_complex(allocator);
-            // const M: Matrix(C) = try self.clone_into_complex(allocator);
-            // defer M.deinit(allocator);
-            // const MMstar = try M_.mult_bt(M, allocator);
-            // // std.debug.print("MMstar:\n", .{});
-            // // try MMstar.print();
+            const I_PPt = try PBS[0].mult_bt(PBS[0], allocator);
+            defer I_PPt.deinit(allocator);
+            std.debug.print("I_PPt:\n", .{});
+            try I_PPt.print();
 
-            // const MstarM = try M_.mult_at(M, allocator);
-            // // std.debug.print("MstarM:\n", .{});
-            // // try MstarM.print();
+            const I_VVt = try PBS[2].mult_bt(PBS[2], allocator);
+            defer I_VVt.deinit(allocator);
+            std.debug.print("I_VVt:\n", .{});
+            try I_VVt.print();
 
-            // const left_eigens = try MMstar.eigendecomposition_QR(F, allocator);
-            // defer left_eigens[0].deinit(allocator);
-            // defer left_eigens[1].deinit(allocator);
+            const BtB = try PBS[1].mult_at(PBS[1], allocator);
+            defer BtB.deinit(allocator);
+            std.debug.print("BtB:\n", .{});
+            try BtB.print();
 
-            // const right_eigens = try MstarM.eigendecomposition_QR(F, allocator);
-            // defer right_eigens[0].deinit(allocator);
-            // defer right_eigens[1].deinit(allocator);
+            const eigens = try BtB.eigendecomposition_QR(F, allocator);
+            defer eigens[0].deinit(allocator);
+            defer eigens[1].deinit(allocator);
+            std.debug.print("eigenvalues:\n", .{});
+            try eigens[0].print();
+            for (0..eigens[0].n) |i| {
+                std.debug.print("eigenvalues[i]={any}\n", .{square_root(T, eigens[0].data[i][0].re)});
+            }
+            std.debug.print("eigenvectors:\n", .{});
+            try eigens[1].print();
 
-            // // std.debug.print("U:\n", .{});
-            // // try left_eigens[1].print();
+            // const BBt = try PBS[1].mult_bt(PBS[1], allocator);
+            const BBt = try self.mult_bt(self, allocator);
+            defer BBt.deinit(allocator);
+            std.debug.print("BBt:\n", .{});
+            try BBt.print();
+            const eigens2 = try BBt.eigendecomposition_QR(F, allocator);
+            defer eigens2[0].deinit(allocator);
+            defer eigens2[1].deinit(allocator);
+            std.debug.print("eigenvalues2:\n", .{});
+            try eigens2[0].print();
+            for (0..eigens2[0].n) |i| {
+                std.debug.print("eigenvalues2[i]={any}\n", .{square_root(T, eigens2[0].data[i][0].re)});
+            }
+            std.debug.print("eigenvectors2:\n", .{});
+            try eigens2[1].print();
 
-            // // std.debug.print("V:\n", .{});
-            // // try right_eigens[1].print();
+            const AtA = try self.mult_at(self, allocator);
+            defer AtA.deinit(allocator);
+            std.debug.print("AtA:\n", .{});
+            try AtA.print();
+            const eigens3 = try AtA.eigendecomposition_QR(F, allocator);
+            defer eigens3[0].deinit(allocator);
+            defer eigens3[1].deinit(allocator);
+            std.debug.print("eigenvalues3:\n", .{});
+            try eigens3[0].print();
+            for (0..eigens3[0].n) |i| {
+                std.debug.print("eigenvalues3[i]={any}\n", .{square_root(T, eigens3[0].data[i][0].re)});
+            }
+            std.debug.print("eigenvectors3:\n", .{});
+            try eigens3[1].print();
 
-            // // std.debug.print("S_left:\n", .{});
-            // // try left_eigens[0].print();
+            const VV = try PBS[2].clone_into_complex(allocator);
+            const E = try eigens[1].mult_bt(VV, allocator);
+            defer E.deinit(allocator);
+            std.debug.print("E:\n", .{});
+            try E.print();
 
-            // // std.debug.print("S_right:\n", .{});
-            // // try right_eigens[0].print();
-
-            // var n: usize = self.n;
-            // var p: usize = self.p;
-            // if (self.n > self.p) {
-            //     n = self.p;
-            //     p = self.n;
-            // }
-            // var row_indexes: []usize = try allocator.alloc(usize, p);
-            // var col_indexes: []usize = try allocator.alloc(usize, n);
-            // defer allocator.free(row_indexes);
-            // defer allocator.free(col_indexes);
-            // for (0..p) |i| {
-            //     row_indexes[i] = i;
-            // }
-            // for (0..n) |j| {
-            //     col_indexes[j] = j;
-            // }
-            // const U = try left_eigens[1].slice(row_indexes, col_indexes, allocator);
-            // const V = try right_eigens[1].slice(col_indexes, col_indexes, allocator);
-            // var S = try Matrix(F).init_fill_complex(n, n, as(f64, F, 0.0), allocator);
-            // const m: usize = left_eigens[0].n;
-            // var j: usize = 0;
-            // for (0..n) |i| {
-            //     if (j < m) {
-            //         if (greater_than(C, absolute(C, left_eigens[0].data[j][0]), as(f64, C, 0.00000001))) {
-            //             S.data[i][i] = square_root(C, left_eigens[0].data[j][0]);
-            //         }
-            //         j += 1;
-            //     } else {
-            //         if (greater_than(C, absolute(C, right_eigens[0].data[j - m][0]), as(f64, C, 0.00000001))) {
-            //             S.data[i][i] = square_root(C, right_eigens[0].data[j - m][0]);
-            //         }
-            //         j += 1;
-            //     }
-            // }
-
-            // return .{ U, S, V };
-
-            const U = try Matrix(F).init_complex(1, 1, allocator);
-            const S = try Matrix(F).init_complex(1, 1, allocator);
-            const V = try Matrix(F).init_complex(1, 1, allocator);
+            var U = try Matrix(T).init(self.n, self.n, allocator);
+            for (0..self.n) |i| {
+                for (0..self.n) |j| {
+                    U.data[i][j] = PBS[0].data[i][j];
+                    // if (j <= 3) {
+                    //     U.data[i][j] = -eigens2[1].data[i][j].re;
+                    // } else {
+                    //     U.data[i][j] = eigens2[1].data[i][j].re;
+                    // }
+                }
+            }
+            var S = try Matrix(T).init_fill(self.n, self.p, 0.0, allocator);
+            var V = try Matrix(T).init(self.p, self.p, allocator);
+            for (0..self.p) |i| {
+                if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                    S.data[i][i] = square_root(T, eigens[0].data[i][0]);
+                } else {
+                    S.data[i][i] = square_root(F, eigens[0].data[i][0].re);
+                }
+                for (0..self.p) |j| {
+                    if ((T == Complex(f16)) or (T == Complex(f32)) or (T == Complex(f64)) or (T == Complex(f128))) {
+                        V.data[i][j] = eigens[1].data[i][j];
+                        // V.data[i][j] = eigens3[1].data[i][j];
+                    } else {
+                        V.data[i][j] = eigens[1].data[i][j].re;
+                        // V.data[i][j] = eigens3[1].data[i][j].re;
+                    }
+                    // if ((j == 0) or (j == 2)) {
+                    //     V.data[i][j] = negative(T, V.data[i][j]);
+                    // }
+                }
+            }
             return .{ U, S, V };
         }
     };
@@ -1420,7 +1565,7 @@ test "Matrix multiplication" {
     }
 }
 
-test "Pivot, norms, reflections, and rotations" {
+test "Pivot, norms, reflections, rotations and bidiagonalisation" {
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
     std.debug.print("Pivot and norms", .{});
     std.debug.print("\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n", .{});
@@ -1472,6 +1617,61 @@ test "Pivot, norms, reflections, and rotations" {
         for (0..n) |j| {
             const k = (i * n) + j;
             try expect(absolute(f64, H.data[i][j] - expected_housholder_reflections[k]) < 0.00001);
+        }
+    }
+
+    // Bidigonalisation
+    const PBS = try a.bidiagonalisation(allocator);
+    defer PBS[0].deinit(allocator);
+    defer PBS[1].deinit(allocator);
+    defer PBS[2].deinit(allocator);
+    const I_PPt = try PBS[0].mult_bt(PBS[0], allocator);
+    defer I_PPt.deinit(allocator);
+    const I_VVt = try PBS[2].mult_bt(PBS[2], allocator);
+    defer I_VVt.deinit(allocator);
+    const PB = try PBS[0].mult(PBS[1], allocator);
+    defer PB.deinit(allocator);
+    const a_reconstructed = try PB.mult(PBS[2], allocator);
+    defer a_reconstructed.deinit(allocator);
+    std.debug.print("P:\n", .{});
+    try PBS[0].print();
+    std.debug.print("B:\n", .{});
+    try PBS[1].print();
+    std.debug.print("S:\n", .{});
+    try PBS[2].print();
+    std.debug.print("I_PPt:\n", .{});
+    try I_PPt.print();
+    for (0..n) |i| {
+        for (0..n) |j| {
+            var value = I_PPt.data[i][j];
+            if (i == j) {
+                value -= 1.00;
+            }
+            if (value < 0.0) {
+                value *= -1.0;
+            }
+            try expect(value < 0.00001);
+        }
+    }
+    std.debug.print("I_VVt:\n", .{});
+    try I_VVt.print();
+    for (0..n) |i| {
+        for (0..n) |j| {
+            var value = I_VVt.data[i][j];
+            if (i == j) {
+                value -= 1.00;
+            }
+            if (value < 0.0) {
+                value *= -1.0;
+            }
+            try expect(value < 0.00001);
+        }
+    }
+    std.debug.print("a_reconstructed = P*B*S:\n", .{});
+    try a_reconstructed.print();
+    for (0..a.n) |i| {
+        for (0..a.p) |j| {
+            try expect(absolute(f64, subtract(f64, a.data[i][j], a_reconstructed.data[i][j])) < 0.000001);
         }
     }
 }
@@ -1901,13 +2101,13 @@ test "Singular value decomposition" {
     std.debug.print("US:\n", .{});
     try US.print();
 
-    const USV = try US.mult(svd_out[2], allocator);
+    const USV = try US.mult_bt(svd_out[2], allocator);
     std.debug.print("USV:\n", .{});
     try USV.print();
 
     for (0..n) |i| {
         for (0..p) |j| {
-            try expect(absolute(f64, subtract(f64, a.data[i][j], USV.data[i][j].re)) < 1.00);
+            try expect(absolute(f64, subtract(f64, a.data[i][j], USV.data[i][j])) < 1.00);
         }
     }
 
@@ -1920,4 +2120,7 @@ test "Singular value decomposition" {
     // U %*% S
     // U %*% S %*% t(V)
     // X
+    // U
+    // S
+    // V
 }
